@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 界面文案走 core 双语表（与 iOS xcstrings 同源）；这里只放系统级资源 -->
+    <string name="app_name">听牌计算器</string>
+</resources>
