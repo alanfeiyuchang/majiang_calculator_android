@@ -21,7 +21,7 @@ class RuleSettingsCodecTest {
             pengPengHuEnabled = false, qingYiSeEnabled = false, qiXiaoDuiEnabled = false,
             haoHuaEnabled = false, menQingEnabled = false, duanYaoJiuEnabled = false,
             goldenHookFan = 1, jiangEnabled = true, genMode = GenMode.BASE,
-            onlyKongCountsAsGen = true, jueZhangEnabled = false, kongBloomEnabled = false,
+            onlyKongCountsAsGen = true, kongBloomEnabled = false,
         )
         val decoded = RuleSettingsStore.decode(RuleSettingsStore.encode(s))
         assertEquals(s, decoded)

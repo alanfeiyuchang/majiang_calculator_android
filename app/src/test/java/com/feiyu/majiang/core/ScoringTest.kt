@@ -188,35 +188,6 @@ class ScoringTest {
             fan = 6, money = 64.0, has = listOf("豪华七小对"), hasnt = listOf("根"))
     }
 
-    // 绝张需知道所胡的牌
-    private fun scWin(
-        hand: String, win: String, melds: List<Meld> = emptyList(),
-        tweak: (RuleSettings) -> RuleSettings = { it },
-    ): WinScore {
-        val f = freq(hand)
-        val w = tiles(win).first().tileIndex
-        f[w] += 1
-        return scoreWinningHand(f, melds, tweak(RuleSettings()),
-            WinContext(selfDrawn = false, winningTileIndex = w))
-    }
-
-    @Test fun t33t34_jueZhang() {
-        // 碰 555万；手 1233467899万 听 5万（完成 345），五万共 4 张：绝张 + 根 + 清一色
-        expect("T33 胡第4张=绝张(默认,与根叠加)",
-            scWin("1233467899m", "5m", listOf(m(Meld.Kind.PONG, "5m"))),
-            fan = 4, money = 16.0, has = listOf("绝张", "根", "清一色"))
-        expect("T33b 关绝张→只剩根",
-            scWin("1233467899m", "5m", listOf(m(Meld.Kind.PONG, "5m"))) { it.copy(jueZhangEnabled = false) },
-            fan = 3, money = 8.0, has = listOf("根", "清一色"), hasnt = listOf("绝张"))
-        expect("T33c 只有杠算根→绝张仍在、无根",
-            scWin("1233467899m", "5m", listOf(m(Meld.Kind.PONG, "5m"))) { it.copy(onlyKongCountsAsGen = true) },
-            fan = 3, money = 8.0, has = listOf("绝张", "清一色"), hasnt = listOf("根"))
-        // 同副牌但胡 6万（非第 4 张的 5万）：有根、无绝张
-        expect("T34 胡非第4张→有根无绝张",
-            scWin("1233457899m", "6m", listOf(m(Meld.Kind.PONG, "5m"))),
-            fan = 3, money = 8.0, has = listOf("根", "清一色"), hasnt = listOf("绝张"))
-    }
-
     @Test fun t19to26_sceneFans() {
         val base = "123456789m234s55s"
         expect("T19 点炮", sc(base), fan = 1, money = 2.0, has = listOf("门清"))

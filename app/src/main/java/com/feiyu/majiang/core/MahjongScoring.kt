@@ -67,8 +67,6 @@ data class RuleSettings(
     val genMode: GenMode = GenMode.FAN,
     /** true = 只有杠（明杠/暗杠）算根；false（默认）= 碰+第4张、手握4张 也算根 */
     val onlyKongCountsAsGen: Boolean = false,
-    /** 绝张（胡的那张牌，自己手里/碰出来已有 3 张，胡它=第 4 张）+1 番，默认开 */
-    val jueZhangEnabled: Boolean = true,
 
     /** 杠上开花 +1 番 */
     val kongBloomEnabled: Boolean = true,
@@ -89,8 +87,6 @@ data class RuleSettings(
  */
 data class WinContext(
     val selfDrawn: Boolean,
-    /** 所胡那张牌的下标（0...26）；用于绝张判定。null = 未知（如 3n+2 已和） */
-    val winningTileIndex: Int? = null,
     /** 杠上开花（自摸 +1 番，受规则开关控制） */
     val kongBloom: Boolean = false,
     /** 海底捞月（摸最后一张自摸，+1 番） */
@@ -253,11 +249,6 @@ fun scoreWinningHand(
     if (isQingYiSe && settings.qingYiSeEnabled) add("清一色", 2)
     if (isMenQing && settings.menQingEnabled) add("门清", 1)
     if (noTerminals && settings.duanYaoJiuEnabled) add("断幺九", 1)
-    // 绝张：所胡那张牌是自己已有 3 张的第 4 张（与根各自计，可叠加）
-    val wt = context.winningTileIndex
-    if (settings.jueZhangEnabled && wt != null && combined[wt] == 4) {
-        add("绝张", 1)
-    }
 
     // 场景番
     if (context.selfDrawn) {

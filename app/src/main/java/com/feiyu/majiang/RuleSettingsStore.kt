@@ -69,7 +69,6 @@ class RuleSettingsStore(context: Context) {
                 jiangEnabled = o.optBoolean("jiangEnabled", d.jiangEnabled),
                 genMode = genMode,
                 onlyKongCountsAsGen = o.optBoolean("onlyKongCountsAsGen", d.onlyKongCountsAsGen),
-                jueZhangEnabled = o.optBoolean("jueZhangEnabled", d.jueZhangEnabled),
                 kongBloomEnabled = o.optBoolean("kongBloomEnabled", d.kongBloomEnabled),
             )
         }
@@ -89,7 +88,6 @@ class RuleSettingsStore(context: Context) {
             put("jiangEnabled", s.jiangEnabled)
             put("genMode", s.genMode.raw)
             put("onlyKongCountsAsGen", s.onlyKongCountsAsGen)
-            put("jueZhangEnabled", s.jueZhangEnabled)
             put("kongBloomEnabled", s.kongBloomEnabled)
         }
     }
