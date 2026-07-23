@@ -117,13 +117,16 @@ private fun AppRoot() {
                 viewModel.recognizeAndCalculate(cropped) { LocalTileRecognizer(context.applicationContext) }
             },
         )
-        showSettings -> SettingsScreen(store = ruleStore, onDone = { showSettings = false })
+        showSettings -> SettingsScreen(
+            store = ruleStore,
+            onDone = { showSettings = false },
+            onPickFromLibrary = { showSettings = false; pickPhoto() },
+        )
         else -> MainScreen(
             viewModel = viewModel,
             ruleStore = ruleStore,
             onOpenSettings = { showSettings = true },
             onTakePhoto = ::startCamera,
-            onPickPhoto = ::pickPhoto,
         )
     }
 }

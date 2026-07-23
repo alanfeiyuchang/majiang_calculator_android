@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -69,7 +70,11 @@ import com.feiyu.majiang.tr
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(store: RuleSettingsStore, onDone: () -> Unit) {
+fun SettingsScreen(
+    store: RuleSettingsStore,
+    onDone: () -> Unit,
+    onPickFromLibrary: () -> Unit = {},
+) {
     var showFanReference by remember { mutableStateOf(false) }
 
     if (showFanReference) {
@@ -180,8 +185,6 @@ fun SettingsScreen(store: RuleSettingsStore, onDone: () -> Unit) {
                 SettingsDivider()
                 ToggleRow(tr("断幺九（+1 番）"), s.duanYaoJiuEnabled) { v -> store.update { it.copy(duanYaoJiuEnabled = v) } }
                 SettingsDivider()
-                ToggleRow(tr("绝张（+1 番）"), s.jueZhangEnabled) { v -> store.update { it.copy(jueZhangEnabled = v) } }
-                SettingsDivider()
                 PickerRow(
                     title = tr("金钩钓"),
                     options = listOf(tr("1 番"), tr("2 番")),
@@ -222,6 +225,21 @@ fun SettingsScreen(store: RuleSettingsStore, onDone: () -> Unit) {
                         .clickable { store.resetToDefaults() }
                         .padding(vertical = 12.dp),
                 )
+            }
+
+            // 从相册选择识别手牌
+            SettingsGroup(footer = tr("拍照识别在主界面底部；这里是从相册里选一张已有的照片来识别。")) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onPickFromLibrary() }
+                        .padding(vertical = 12.dp),
+                ) {
+                    Icon(Icons.Filled.PhotoLibrary, contentDescription = null, tint = Theme.accent)
+                    Spacer(Modifier.width(10.dp))
+                    Text(tr("从相册选择识别手牌"), fontSize = 16.sp)
+                }
             }
             Spacer(Modifier.padding(bottom = 16.dp))
         }
@@ -375,7 +393,6 @@ fun FanReferenceScreen(settings: RuleSettings, onBack: () -> Unit) {
     val extraRows = listOf(
         Row(tr("门清"), tr("+1 番"), tr("没有碰、没有明杠（暗杠可），点炮/自摸都算"), enabled = settings.menQingEnabled),
         Row(tr("断幺九"), tr("+1 番"), tr("整副牌完全没有 1 和 9"), enabled = settings.duanYaoJiuEnabled),
-        Row(tr("绝张"), tr("+1 番"), tr("胡的那张，自己已有 3 张（手里 / 碰），胡它=第 4 张"), enabled = settings.jueZhangEnabled),
         Row(
             tr("根"), genFan,
             if (settings.onlyKongCountsAsGen) tr("只有杠：明杠 / 暗杠")

@@ -46,7 +46,6 @@ import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -141,7 +140,6 @@ fun MainScreen(
     ruleStore: RuleSettingsStore,
     onOpenSettings: () -> Unit,
     onTakePhoto: () -> Unit,
-    onPickPhoto: () -> Unit,
 ) {
     var keyboardSuit by rememberSaveable { mutableStateOf(MahjongCard.Suit.WAN) }
     var inputTarget by rememberSaveable { mutableStateOf(InputTarget.HAND) }
@@ -155,15 +153,13 @@ fun MainScreen(
     var earthly by remember { mutableStateOf(false) }
     /** 点击听牌弹出番型明细 */
     var breakdownCard by remember { mutableStateOf<MahjongCard?>(null) }
-    var showSourceDialog by remember { mutableStateOf(false) }
 
     val settings = ruleStore.settings
     val hasKongMeld = viewModel.melds.any { it.kind.isKong }
     val kongBloomAvailable = hasKongMeld && settings.kongBloomEnabled
 
-    fun winContext(selfDrawn: Boolean, winningTileIndex: Int? = null) = WinContext(
+    fun winContext(selfDrawn: Boolean) = WinContext(
         selfDrawn = selfDrawn,
-        winningTileIndex = winningTileIndex,
         kongBloom = selfDrawn && kongBloom && kongBloomAvailable,
         lastTileDraw = selfDrawn && lastTileDraw,
         kongDischargeWin = !selfDrawn && kongDischargeWin,
@@ -172,13 +168,13 @@ fun MainScreen(
         earthly = !selfDrawn && earthly,
     )
 
-    /** 手牌补上 card 后这副胡牌的番与钱（card 即所胡那张，用于绝张判定） */
+    /** 手牌补上 card 后这副胡牌的番与钱 */
     fun winScore(adding: MahjongCard, selfDrawn: Boolean? = null): WinScore {
         val freq = handToFrequency27(viewModel.selectedTiles.map { it.card })
         freq[adding.tileIndex] += 1
         return scoreWinningHand(
             freq, viewModel.melds.toList(), settings,
-            winContext(selfDrawn ?: showSelfDraw, adding.tileIndex)
+            winContext(selfDrawn ?: showSelfDraw)
         )
     }
 
@@ -246,7 +242,7 @@ fun MainScreen(
                 onSuitChange = { keyboardSuit = it },
                 inputTarget = inputTarget,
                 onTargetChange = { inputTarget = it },
-                onPhoto = { showSourceDialog = true },
+                onPhoto = onTakePhoto,
             )
         },
     ) { padding ->
@@ -305,21 +301,6 @@ fun MainScreen(
                 }
             }
         }
-    }
-
-    // 选择图片来源
-    if (showSourceDialog) {
-        AlertDialog(
-            onDismissRequest = { showSourceDialog = false },
-            title = { Text(tr("选择图片来源")) },
-            confirmButton = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    TextButton(onClick = { showSourceDialog = false; onTakePhoto() }) { Text(tr("拍照")) }
-                    TextButton(onClick = { showSourceDialog = false; onPickPhoto() }) { Text(tr("从相册选择")) }
-                    TextButton(onClick = { showSourceDialog = false }) { Text(tr("取消")) }
-                }
-            },
-        )
     }
 
     // 番型明细

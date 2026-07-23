@@ -9,6 +9,7 @@ package com.feiyu.majiang.recognition
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,10 +28,12 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.RotateLeft
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -37,6 +41,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,6 +62,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -85,13 +91,23 @@ fun CropScreen(
     val handleSize = 28.dp
     val minCrop = 44f * androidx.compose.ui.platform.LocalDensity.current.density
 
-    Scaffold(
-        containerColor = Color.Black,
+    // 首次进入裁剪页时弹出一次：教用户拖框圈出自己的手牌
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember {
+        context.getSharedPreferences("majiang.prefs", android.content.Context.MODE_PRIVATE)
+    }
+    var showTutorialPopup by remember {
+        mutableStateOf(!prefs.getBoolean("hasSeenCropTutorial", false))
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            containerColor = Color.Black,
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        if (cropRect == null) tr("拖动框选 · 可旋转") else tr("调整选区"),
+                        if (cropRect == null) tr("框选自己的手牌 · 可旋转") else tr("调整选区"),
                         fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                     )
                 },
@@ -134,24 +150,50 @@ fun CropScreen(
                         Text(tr("清除框选"), fontSize = 14.sp)
                     }
                 }
-                Button(
-                    onClick = {
-                        val bmp = working
-                        val rect = cropRect
-                        // performCrop 在下方 BoxWithConstraints 外无法拿 imageRect —— 用保存的比例
-                        onCrop(performCrop(bmp, rect, lastImageRect))
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Theme.accent),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                ) {
+                val recognizeLabel: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
                     Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
                         if (cropRect == null) tr("识别整张照片") else tr("识别选中区域"),
                         fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                val onRecognize = {
+                    val bmp = working
+                    val rect = cropRect
+                    // performCrop 在下方 BoxWithConstraints 外无法拿 imageRect —— 用保存的比例
+                    onCrop(performCrop(bmp, rect, lastImageRect))
+                }
+                // 未框选时降为次要样式，引导优先框选；已框选则是推荐操作，用主色实心
+                if (cropRect == null) {
+                    OutlinedButton(
+                        onClick = onRecognize,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Theme.accent),
+                        border = BorderStroke(1.dp, Theme.accent),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        content = recognizeLabel,
+                    )
+                } else {
+                    Button(
+                        onClick = onRecognize,
+                        colors = ButtonDefaults.buttonColors(containerColor = Theme.accent),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        content = recognizeLabel,
+                    )
+                }
+                if (cropRect == null) {
+                    Text(
+                        tr("不划区域也能识别，但整桌入镜时牌小、易混入别人的牌，准确率会下降；建议先圈出自己的手牌。"),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 8.dp),
                     )
                 }
             }
@@ -211,6 +253,11 @@ fun CropScreen(
                         )
                     }
             )
+
+            // 顶部：未框选时的常驻提示——教用户圈出自己的手牌以提高识别准确率
+            if (cropRect == null) {
+                CropTutorialBanner(modifier = Modifier.align(Alignment.TopCenter))
+            }
 
             val rect = cropRect
             if (rect != null) {
@@ -304,6 +351,85 @@ fun CropScreen(
                             }
                     )
                 }
+            }
+        }
+    }
+
+    if (showTutorialPopup) {
+        CropTutorialPopup(
+            onDismiss = {
+                prefs.edit().putBoolean("hasSeenCropTutorial", true).apply()
+                showTutorialPopup = false
+            },
+        )
+    }
+    }
+}
+
+/** 顶部：未框选时的常驻提示——教用户圈出自己的手牌以提高识别准确率 */
+@Composable
+private fun CropTutorialBanner(modifier: Modifier = Modifier) {
+    Row(
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier
+            .padding(horizontal = 24.dp)
+            .padding(top = 8.dp)
+            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(50))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Icon(
+            Icons.Filled.PanTool, contentDescription = null,
+            tint = Color.White, modifier = Modifier.size(16.dp),
+        )
+        Text(
+            tr("圈出自己的手牌（含碰/杠），排除别人的牌和弃牌堆，识别更准"),
+            fontSize = 12.sp, fontWeight = FontWeight.Medium,
+            color = Color.White,
+        )
+    }
+}
+
+/** 首次进入裁剪页时弹出一次：教用户拖框圈出自己的手牌 */
+@Composable
+private fun CropTutorialPopup(onDismiss: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.45f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier
+                .padding(horizontal = 32.dp)
+                .widthIn(max = 320.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(20.dp))
+                .padding(24.dp),
+        ) {
+            Icon(
+                Icons.Filled.PanTool, contentDescription = null,
+                tint = Theme.accent, modifier = Modifier.size(34.dp),
+            )
+            Text(
+                tr("圈出自己的手牌"),
+                fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                tr("在照片上按住并拖动，画一个框只圈住你自己的手牌（含碰/杠），排除别人的牌和弃牌堆，识别会更准。"),
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center,
+            )
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = Theme.accent),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(tr("知道了"), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
