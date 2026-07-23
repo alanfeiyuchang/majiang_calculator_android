@@ -93,7 +93,7 @@ Play Console → 所有应用 → 创建应用，逐项填写：
 ```
 1024 × 500 px，JPG 或 24 位 PNG（不带 alpha）
 ```
-> 可参照 iOS 仓库 `app store/screenshots/compose_promo.py` 的配色（深绿渐变 #28815A → #0C3823 + 金色/白色文案）另出一张横版banner。
+> 已生成好：`play store/feature-graphic.png`（图标 + 「听牌计算器」+「拍照识别 · 算番算钱 · 四川麻将」，配色与 iOS 促销图同一套深绿渐变 + 金色/白色文案），直接上传即可。重新生成用 `play store/make_feature_graphic.py`（改脚本里的 `TITLE`/`TAGLINE` 常量即可换文案）。
 
 **手机截图（Phone screenshots，2–8 张）**
 ```
