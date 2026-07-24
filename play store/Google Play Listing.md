@@ -101,6 +101,15 @@ JPEG 或 24 位 PNG，单边 320–3840 px，长宽比介于 16:9 与 9:16 之�
 ```
 > 用安卓模拟器/真机截图即可，不强制要求像 iOS 那样加渐变背景和文案；直接用干净的界面截图（听牌结果、算番明细、打牌建议、规则设置等）即可满足要求，风格上可以和 iOS 的 5 张促销图对应但不必套用同一张模板。
 
+**平板截图（Tablet screenshots，Play Console 会分别要求 7 英寸和 10 英寸两档，均为必填）**
+```
+PNG 或 JPEG，最大 8 MB/张，长宽比 16:9 或 9:16，单边 320–3840 px
+```
+> 本应用是仅支持竖屏的手机应用，没有专门的平板布局——已生成好的两组图片是把真实的手机截图（规则设置、算番结果，中文界面、真实数据）居中放在对应尺寸的渐变背景画布上，同一套视觉风格，不是拉伸变形手机 UI，这是手机专属应用满足 Play 平板截图要求的常见合规做法：
+> - `play store/7-inch/1_scoring.png`、`2_settings.png`（1200 × 1920）
+> - `play store/10-inch/1_scoring.png`、`2_settings.png`（1600 × 2560）
+> - 重新生成：改 `play store/make_tablet_screenshots.py` 里的 `SCREENS`（文案）或 `tablet-screenshots/raw_*.png`（换截图），再 `python3 make_tablet_screenshots.py`。
+
 **应用类型（Category）**
 ```
 工具（Tools）
