@@ -64,7 +64,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.feiyu.majiang.RuleSettingsStore
+import com.feiyu.majiang.core.GameMode
 import com.feiyu.majiang.core.GenMode
+import com.feiyu.majiang.core.MCRFanInfo
+import com.feiyu.majiang.core.MCR_FAN_POINTS
 import com.feiyu.majiang.core.RuleSettings
 import com.feiyu.majiang.tr
 
@@ -76,14 +79,20 @@ fun SettingsScreen(
     onPickFromLibrary: () -> Unit = {},
 ) {
     var showFanReference by remember { mutableStateOf(false) }
+    var showMCRFanReference by remember { mutableStateOf(false) }
 
     if (showFanReference) {
         FanReferenceScreen(settings = store.settings, onBack = { showFanReference = false })
         return
     }
+    if (showMCRFanReference) {
+        MCRFanReferenceScreen(onBack = { showMCRFanReference = false })
+        return
+    }
 
     BackHandler { onDone() }
     val s = store.settings
+    val isMCR = s.gameMode.isMCR
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -102,6 +111,94 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // 玩法
+            SettingsGroup(header = tr("玩法"), footer = tr(s.gameMode.summary)) {
+                PickerRow(
+                    title = tr("玩法"),
+                    options = GameMode.entries.map { tr(it.label) },
+                    selectedIndex = GameMode.entries.indexOf(s.gameMode),
+                    onSelect = { i -> store.update { st -> st.copy(gameMode = GameMode.entries[i]) } },
+                )
+            }
+
+            if (isMCR) {
+                // 圈风 / 门风
+                SettingsGroup(
+                    header = tr("圈风 / 门风"),
+                    footer = tr("影响圈风刻、门风刻（各 2 分）。门风就是自己的座位风。"),
+                ) {
+                    PickerRow(
+                        title = tr("圈风"),
+                        options = WIND_NAMES.map { tr(it) },
+                        selectedIndex = s.mcrPrevalentWind.coerceIn(0, 3),
+                        onSelect = { i -> store.update { st -> st.copy(mcrPrevalentWind = i) } },
+                    )
+                    SettingsDivider()
+                    PickerRow(
+                        title = tr("门风"),
+                        options = WIND_NAMES.map { tr(it) },
+                        selectedIndex = s.mcrSeatWind.coerceIn(0, 3),
+                        onSelect = { i -> store.update { st -> st.copy(mcrSeatWind = i) } },
+                    )
+                }
+
+                // 规则细则：各地规则书有分歧的地方
+                SettingsGroup(
+                    header = tr("规则细则"),
+                    subheader = tr("下面这几条是各地规则书写法有分歧的地方，按你们桌上的打法选。默认是最常见的算法。"),
+                ) {
+                    MCRRuleToggle(
+                        title = tr("字一色同时计混幺九"),
+                        note = tr("整副牌全是风牌箭牌时：开 = 字一色之外再加 32 分的混幺九；关 = 只算字一色的 64 分。"),
+                        checked = s.mcrZiYiSeCountsHunYaoJiu,
+                    ) { v -> store.update { it.copy(mcrZiYiSeCountsHunYaoJiu = v) } }
+                    SettingsDivider()
+                    MCRRuleToggle(
+                        title = tr("九莲宝灯同时计双暗刻"),
+                        note = tr("和出九莲宝灯时：开 = 牌里那两个暗刻另加 2 分；关 = 只算九莲宝灯的 88 分。"),
+                        checked = s.mcrJiuLianCountsShuangAnKe,
+                    ) { v -> store.update { it.copy(mcrJiuLianCountsShuangAnKe = v) } }
+                    SettingsDivider()
+                    MCRRuleToggle(
+                        title = tr("七对里四张相同当两对"),
+                        note = tr("手里有四张一样的牌时：开 = 拆成两对，照样算七对；关 = 不算七对，能拆成顺子刻子就按普通牌型算，拆不出来就是没和。"),
+                        checked = s.mcrSevenPairsAllowsQuadAsTwoPairs,
+                    ) { v -> store.update { it.copy(mcrSevenPairsAllowsQuadAsTwoPairs = v) } }
+                    SettingsDivider()
+                    MCRRuleToggle(
+                        title = tr("三杠之外每个杠另算"),
+                        note = tr("开了三个杠时：开 = 三杠 32 分之外，每个明杠再加 1 分、暗杠再加 2 分；关 = 只算三杠的 32 分。"),
+                        checked = s.mcrPerKongFanWithThreeKongs,
+                    ) { v -> store.update { it.copy(mcrPerKongFanWithThreeKongs = v) } }
+                    SettingsDivider()
+                    MCRRuleToggle(
+                        title = tr("边张 / 坎张 / 单钓将就高算"),
+                        note = tr("和的那张牌能有好几种读法时：开 = 按对你有利的那种读，这 1 分照给；关 = 只有读法唯一、没有第二种拆法时才给这 1 分。"),
+                        checked = s.mcrWaitFanHighestReading,
+                    ) { v -> store.update { it.copy(mcrWaitFanHighestReading = v) } }
+                }
+
+                // 番型一览（81 种）
+                SettingsGroup(
+                    footer = tr("国标不按底分翻倍算钱，只算番分，起和 8 分。花牌每张 1 分，不计入起和分。拍照识别只认万/筒/条，风牌、箭牌、花牌需手动补入。")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showMCRFanReference = true }
+                            .padding(vertical = 12.dp),
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ListAlt, contentDescription = null, tint = Theme.accent)
+                        Spacer(Modifier.width(10.dp))
+                        Text(tr("番型一览（81 种）"), fontSize = 16.sp)
+                        Spacer(Modifier.weight(1f))
+                        Text("›", fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
+                    }
+                }
+            }
+
+            if (!isMCR) {
             // 计钱
             SettingsGroup(header = tr("计钱"), footer = tr("金额 = 底分 × 2^番数（封顶截断），为单家输赢：点炮由放炮者付，自摸三家各付。")) {
                 // 与 iOS 一致：右对齐无边框输入 + 「元」
@@ -213,6 +310,7 @@ fun SettingsScreen(
                     Text("›", fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
                 }
             }
+            }   // if (!isMCR)
 
             // 恢复默认
             SettingsGroup {
@@ -246,9 +344,14 @@ fun SettingsScreen(
     }
 }
 
+/** 圈风 / 门风的四种风（中文原文即本地化 key） */
+private val WIND_NAMES = listOf("东", "南", "西", "北")
+
 @Composable
 private fun SettingsGroup(
     header: String? = null,
+    /** 组标题下面的一段说明（比 footer 更靠近内容，用于「规则细则」这种需要先解释的分组） */
+    subheader: String? = null,
     footer: String? = null,
     content: @Composable () -> Unit,
 ) {
@@ -258,6 +361,13 @@ private fun SettingsGroup(
                 header, fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                 modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 6.dp),
+            )
+        }
+        if (subheader != null) {
+            Text(
+                subheader, fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
             )
         }
         Surface(
@@ -302,6 +412,31 @@ private fun ToggleRow(
             onCheckedChange = onChange,
             enabled = enabled,
             colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFF34C759)),   // iOS 绿色
+        )
+    }
+}
+
+/** 「规则细则」里的一条：开关 + 一句讲清开/关差别的人话 */
+@Composable
+private fun MCRRuleToggle(
+    title: String,
+    note: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Column(Modifier.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text(title, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            Switch(
+                checked = checked,
+                onCheckedChange = onChange,
+                colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFF34C759)),
+            )
+        }
+        Text(
+            note, fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+            modifier = Modifier.padding(bottom = 4.dp),
         )
     }
 }
@@ -494,6 +629,101 @@ fun FanReferenceScreen(settings: RuleSettings, onBack: () -> Unit) {
             section(tr("常见组合（自动叠出，不单列）"), comboRows)
             section(tr("附加番"), extraRows)
             section(tr("场景番（胡牌时勾选）"), situationalRows)
+            Spacer(Modifier.padding(bottom = 16.dp))
+        }
+    }
+}
+
+// MARK: - 番型一览（国标 81 种）
+
+/** 国标 81 种番型速查：按分值分档，点一条展开它的一句话含义 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MCRFanReferenceScreen(onBack: () -> Unit) {
+    BackHandler { onBack() }
+    var explainName by remember { mutableStateOf<String?>(null) }
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = { Text(tr("番型一览（81 种）"), fontWeight = FontWeight.SemiBold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Column(
+            Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    tr("国标起和 8 分：一副牌的番分（不含花牌）达到 8 分才能和。番型之间遵守不重复计算原则——已经被高番型「包含」的低番型不再另计。"),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
+
+            MCRFanInfo.groups.forEach { (points, names) ->
+                Column {
+                    Text(
+                        tr("%lld 分", points), fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 6.dp),
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                            names.forEachIndexed { i, name ->
+                                if (i > 0) SettingsDivider()
+                                Column(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            explainName = if (explainName == name) null else name
+                                        }
+                                        .padding(vertical = 10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(tr(MCRFanInfo.displayKey(name)), fontSize = 15.sp)
+                                        Spacer(Modifier.weight(1f))
+                                        Text(
+                                            tr("%lld 分", MCR_FAN_POINTS[name] ?: points),
+                                            fontSize = 14.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                        )
+                                    }
+                                    if (explainName == name) {
+                                        MCRFanInfo.table[name]?.let {
+                                            Text(
+                                                tr(it), fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             Spacer(Modifier.padding(bottom = 16.dp))
         }
     }

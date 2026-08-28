@@ -25,6 +25,9 @@ object Theme {
         MahjongCard.Suit.WAN -> Color(red = 0.88f, green = 0.28f, blue = 0.24f)
         MahjongCard.Suit.TONG -> Color(red = 0.18f, green = 0.48f, blue = 0.88f)
         MahjongCard.Suit.TIAO -> Color(red = 0.15f, green = 0.62f, blue = 0.36f)
+        MahjongCard.Suit.FENG -> Color(red = 0.36f, green = 0.36f, blue = 0.42f)
+        MahjongCard.Suit.JIAN -> Color(red = 0.70f, green = 0.30f, blue = 0.62f)
+        MahjongCard.Suit.HUA -> Color(red = 0.85f, green = 0.55f, blue = 0.10f)
     }
 }
 

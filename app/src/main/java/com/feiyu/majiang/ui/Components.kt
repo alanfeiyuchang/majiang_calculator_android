@@ -6,11 +6,13 @@
 package com.feiyu.majiang.ui
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,11 +30,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.feiyu.majiang.R
@@ -59,7 +63,39 @@ fun tileDrawable(card: MahjongCard): Int = when (card.assetName) {
     else -> R.drawable.tile_sou_9
 }
 
-/** 手牌 / 听牌块（3:4 牌面图）；fillWidth = 由外层网格决定宽度（如 7 列手牌网格） */
+/** 字牌 / 花牌没有牌面图（YOLO 模型也认不出），用象牙底 + 单字画一张 */
+@Composable
+fun TileFaceText(card: MahjongCard, height: Dp, modifier: Modifier = Modifier) {
+    // 中红、发绿、白蓝框；风牌墨黑；花牌用暖色
+    val ink = when {
+        card.suit == MahjongCard.Suit.JIAN && card.rank == 1 -> Color(red = 0.80f, green = 0.16f, blue = 0.16f)
+        card.suit == MahjongCard.Suit.JIAN && card.rank == 2 -> Color(red = 0.10f, green = 0.52f, blue = 0.28f)
+        card.suit == MahjongCard.Suit.JIAN -> Color(red = 0.20f, green = 0.40f, blue = 0.78f)
+        card.suit == MahjongCard.Suit.HUA -> Color(red = 0.85f, green = 0.45f, blue = 0.10f)
+        else -> Color(red = 0.16f, green = 0.16f, blue = 0.18f)
+    }
+    Box(
+        modifier = modifier.background(
+            Brush.verticalGradient(
+                listOf(
+                    Color(red = 0.99f, green = 0.98f, blue = 0.94f),
+                    Color(red = 0.94f, green = 0.92f, blue = 0.86f),
+                )
+            )
+        ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            card.rankHanDigit,
+            fontSize = (height.value * 0.5f).sp,
+            fontWeight = FontWeight.Bold,
+            color = ink,
+            maxLines = 1,
+        )
+    }
+}
+
+/** 手牌 / 听牌块（3:4 牌面图；字牌/花牌用文字牌面）；fillWidth = 由外层网格决定宽度 */
 @Composable
 fun MahjongTileChip(
     card: MahjongCard,
@@ -69,22 +105,29 @@ fun MahjongTileChip(
     modifier: Modifier = Modifier,
 ) {
     val width = if (large) 46.dp else 38.dp
+    val height = width * 4f / 3f
     val corner = width * 0.16f
     val shape = RoundedCornerShape(corner)
-    Image(
-        painter = painterResource(tileDrawable(card)),
-        contentDescription = card.displayText,
-        contentScale = ContentScale.Fit,
-        modifier = modifier
-            .let {
-                if (fillWidth) it.fillMaxWidth().aspectRatio(3f / 4f)
-                else it.size(width, width * 4f / 3f)
-            }
-            .shadow(2.5.dp, shape)
-            .clip(shape)
-            .border(1.25.dp, Color.Black.copy(alpha = 0.28f), shape)
-            .let { if (onTap != null) it.clickable { onTap() } else it },
-    )
+    val box = modifier
+        .let {
+            if (fillWidth) it.fillMaxWidth().aspectRatio(3f / 4f)
+            else it.size(width, height)
+        }
+        .shadow(2.5.dp, shape)
+        .clip(shape)
+        .border(1.25.dp, Color.Black.copy(alpha = 0.28f), shape)
+        .let { if (onTap != null) it.clickable { onTap() } else it }
+
+    if (card.hasImageAsset) {
+        Image(
+            painter = painterResource(tileDrawable(card)),
+            contentDescription = card.displayText,
+            contentScale = ContentScale.Fit,
+            modifier = box,
+        )
+    } else {
+        TileFaceText(card, height, box)
+    }
 }
 
 /** 分区卡片（标题 + 图标 + 右侧附注） */
@@ -134,8 +177,8 @@ fun SectionCard(
 fun MeldChipGroup(meld: Meld, onRemove: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            repeat(meld.tileCount) {
-                MahjongTileChip(card = meld.card, onTap = onRemove)
+            meld.tiles.forEach { tile ->
+                MahjongTileChip(card = tile, onTap = onRemove)
             }
         }
         Text(

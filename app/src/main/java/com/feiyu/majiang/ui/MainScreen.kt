@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -91,12 +92,21 @@ import com.feiyu.majiang.L10n
 import com.feiyu.majiang.MahjongViewModel
 import com.feiyu.majiang.RuleSettingsStore
 import com.feiyu.majiang.core.FanItem
+import com.feiyu.majiang.core.GameMode
+import com.feiyu.majiang.core.MCRContext
+import com.feiyu.majiang.core.MCREvaluatedDiscard
+import com.feiyu.majiang.core.MCRFanInfo
+import com.feiyu.majiang.core.MCRScore
+import com.feiyu.majiang.core.MCR_MINIMUM_POINTS
 import com.feiyu.majiang.core.MahjongCard
 import com.feiyu.majiang.core.Meld
 import com.feiyu.majiang.core.WinContext
 import com.feiyu.majiang.core.WinScore
 import com.feiyu.majiang.core.handToFrequency27
+import com.feiyu.majiang.core.handToFrequency34
+import com.feiyu.majiang.core.mcrEvaluateDiscards
 import com.feiyu.majiang.core.moneyText
+import com.feiyu.majiang.core.scoreMCRHand
 import com.feiyu.majiang.core.scoreWinningHand
 import com.feiyu.majiang.tr
 import kotlinx.coroutines.launch
@@ -104,15 +114,22 @@ import kotlinx.coroutines.launch
 // MARK: - 键盘输入去向
 
 enum class InputTarget(val raw: String) {
-    HAND("手牌"), PONG("碰"), EXPOSED_KONG("明杠"), CONCEALED_KONG("暗杠");
+    HAND("手牌"), CHOW("吃"), PONG("碰"), EXPOSED_KONG("明杠"), CONCEALED_KONG("暗杠");
 
     val meldKind: Meld.Kind?
         get() = when (this) {
             HAND -> null
+            CHOW -> Meld.Kind.CHOW
             PONG -> Meld.Kind.PONG
             EXPOSED_KONG -> Meld.Kind.EXPOSED_KONG
             CONCEALED_KONG -> Meld.Kind.CONCEALED_KONG
         }
+
+    companion object {
+        /** 该玩法下可选的输入去向（吃只在国标出现） */
+        fun casesFor(mode: GameMode): List<InputTarget> =
+            if (mode.isMCR) entries.toList() else entries.filter { it != CHOW }
+    }
 }
 
 // MARK: - 番型文字本地化（与 iOS ContentView 静态函数对应）
@@ -130,6 +147,47 @@ fun fanTotalText(score: WinScore): String =
     else tr("%lld 番", score.totalFan)
 
 fun fanLine(item: FanItem): String = "${localizedFanName(item.name)} ${fanItemText(item)}"
+
+// MARK: - 国标番分文字
+
+/** 一项国标番型的文字：「名 ×N 8 分」 */
+fun mcrFanLine(item: FanItem): String {
+    val name = localizedFanName(MCRFanInfo.displayKey(item.name))
+    val head = if (item.count > 1) "$name×${item.count}" else name
+    return "$head ${tr("%lld 分", item.fan)}"
+}
+
+/** 「N 分」，含花牌时写成「N 分（含花 M）」 */
+fun mcrTotalText(score: MCRScore): String {
+    val flowers = score.totalPoints - score.scoringPoints
+    return if (flowers > 0) tr("%lld 分（含花 %lld）", score.totalPoints, flowers)
+    else tr("%lld 分", score.totalPoints)
+}
+
+/**
+ * 国标结果区要用到的一整套状态与算分入口。
+ * 参数太多，打包成一个对象往下传，免得结果区的形参列表继续膨胀。
+ */
+class MCRUiState(
+    /** 当前是国标玩法 */
+    val enabled: Boolean,
+    /** 手牌 + 副露凑够 14 张（已和） */
+    val isFullHand: Boolean,
+    /** 能不能给出可信的番分（13 或 14 张才行；部分手牌只排向听不算番） */
+    val scoringAvailable: Boolean,
+    val hasKongMeld: Boolean,
+    val kongBloom: Boolean, val onKongBloom: (Boolean) -> Unit,
+    val lastTileDraw: Boolean, val onLastTileDraw: (Boolean) -> Unit,
+    val lastDiscard: Boolean, val onLastDiscard: (Boolean) -> Unit,
+    val robbingKong: Boolean, val onRobbingKong: (Boolean) -> Unit,
+    val lastTileOfKind: Boolean, val onLastTileOfKind: (Boolean) -> Unit,
+    /** 补上这张牌后的番分（selfDrawn = null 表示跟随结算方式分段控件） */
+    val score: (MahjongCard, Boolean?) -> MCRScore,
+    /** 已和时整副牌的番分 */
+    val wonScore: (Boolean) -> MCRScore,
+    /** 打牌建议 + 弃后听牌的番分 */
+    val evaluatedDiscards: () -> List<MCREvaluatedDiscard>,
+)
 
 // MARK: - 主界面
 
@@ -151,12 +209,26 @@ fun MainScreen(
     var kongDischargeWin by remember { mutableStateOf(false) }
     var robbingKong by remember { mutableStateOf(false) }
     var earthly by remember { mutableStateOf(false) }
+    // 国标场景番（妙手回春 / 海底捞月 / 抢杠和 / 和绝张）
+    var mcrLastTileDraw by remember { mutableStateOf(false) }
+    var mcrLastDiscard by remember { mutableStateOf(false) }
+    var mcrRobbingKong by remember { mutableStateOf(false) }
+    var mcrLastTileOfKind by remember { mutableStateOf(false) }
     /** 点击听牌弹出番型明细 */
     var breakdownCard by remember { mutableStateOf<MahjongCard?>(null) }
 
     val settings = ruleStore.settings
+    val gameMode = settings.gameMode
+    val isMCR = gameMode.isMCR
     val hasKongMeld = viewModel.melds.any { it.kind.isKong }
     val kongBloomAvailable = hasKongMeld && settings.kongBloomEnabled
+
+    // 玩法由设置页决定，同步给 ViewModel（切玩法时它会清空手牌与副露）
+    LaunchedEffect(gameMode) {
+        viewModel.switchGameMode(gameMode)
+        if (keyboardSuit !in gameMode.suits) keyboardSuit = MahjongCard.Suit.WAN
+        if (inputTarget !in InputTarget.casesFor(gameMode)) inputTarget = InputTarget.HAND
+    }
 
     fun winContext(selfDrawn: Boolean) = WinContext(
         selfDrawn = selfDrawn,
@@ -184,6 +256,57 @@ fun MainScreen(
         viewModel.melds.toList(), settings, winContext(selfDrawn)
     )
 
+    // MARK: 国标算分
+
+    fun mcrContext(selfDrawn: Boolean, winningTile: Int) = MCRContext(
+        selfDrawn = selfDrawn,
+        winningTile = winningTile,
+        prevalentWind = settings.mcrPrevalentWind,
+        seatWind = settings.mcrSeatWind,
+        kongBloom = selfDrawn && kongBloom && hasKongMeld,
+        lastTileDraw = selfDrawn && mcrLastTileDraw,
+        lastDiscard = !selfDrawn && mcrLastDiscard,
+        robbingKong = !selfDrawn && mcrRobbingKong,
+        lastTileOfKind = mcrLastTileOfKind,
+        flowers = viewModel.flowerTiles.size,
+    )
+
+    fun mcrScore(adding: MahjongCard, selfDrawn: Boolean?): MCRScore {
+        val freq = handToFrequency34(viewModel.handTiles)
+        val i = adding.mcrIndex
+        if (i >= 0) freq[i] += 1
+        return scoreMCRHand(
+            freq, viewModel.melds.toList(),
+            mcrContext(selfDrawn ?: showSelfDraw, i), settings.mcrOptions
+        )
+    }
+
+    fun mcrWonScore(selfDrawn: Boolean): MCRScore = scoreMCRHand(
+        handToFrequency34(viewModel.handTiles), viewModel.melds.toList(),
+        mcrContext(selfDrawn, -1), settings.mcrOptions
+    )
+
+    val effectiveTiles = viewModel.handTiles.size + 3 * viewModel.melds.size
+    val mcrUi = MCRUiState(
+        enabled = isMCR,
+        isFullHand = effectiveTiles == 14,
+        scoringAvailable = effectiveTiles == 13 || effectiveTiles == 14,
+        hasKongMeld = hasKongMeld,
+        kongBloom = kongBloom, onKongBloom = { kongBloom = it },
+        lastTileDraw = mcrLastTileDraw, onLastTileDraw = { mcrLastTileDraw = it },
+        lastDiscard = mcrLastDiscard, onLastDiscard = { mcrLastDiscard = it },
+        robbingKong = mcrRobbingKong, onRobbingKong = { mcrRobbingKong = it },
+        lastTileOfKind = mcrLastTileOfKind, onLastTileOfKind = { mcrLastTileOfKind = it },
+        score = ::mcrScore,
+        wonScore = ::mcrWonScore,
+        evaluatedDiscards = {
+            mcrEvaluateDiscards(
+                viewModel.discards, viewModel.handTiles, viewModel.melds.toList(),
+                settings, viewModel.flowerTiles.size
+            )
+        },
+    )
+
     val scrollState = rememberScrollState()
     var resultOffset by remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
@@ -196,6 +319,8 @@ fun MainScreen(
         } else {
             kongBloom = false; lastTileDraw = false; heavenly = false
             kongDischargeWin = false; robbingKong = false; earthly = false
+            mcrLastTileDraw = false; mcrLastDiscard = false
+            mcrRobbingKong = false; mcrLastTileOfKind = false
         }
     }
     LaunchedEffect(viewModel.hintMessage) {
@@ -209,7 +334,12 @@ fun MainScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text(tr("听牌计算器"), fontWeight = FontWeight.Bold) },
+                title = {
+                    Text(
+                        if (isMCR) tr("听牌计算器 · 国标") else tr("听牌计算器"),
+                        fontWeight = FontWeight.Bold,
+                    )
+                },
                 navigationIcon = {
                     Row {
                         IconButton(onClick = onOpenSettings) {
@@ -238,6 +368,7 @@ fun MainScreen(
         bottomBar = {
             BottomKeyboard(
                 viewModel = viewModel,
+                gameMode = gameMode,
                 keyboardSuit = keyboardSuit,
                 onSuitChange = { keyboardSuit = it },
                 inputTarget = inputTarget,
@@ -255,7 +386,7 @@ fun MainScreen(
                 verticalArrangement = Arrangement.spacedBy(Theme.sectionSpacing),
             ) {
                 HandSection(viewModel)
-                MeldSection(viewModel)
+                MeldSection(viewModel, isMCR)
                 AnalyzeButton(viewModel, onAnalyze = { viewModel.completeCalculation() })
                 RecognitionNoticeBanner(viewModel.recognitionNotice)
                 Box(Modifier.onGloballyPositioned { resultOffset = it.positionInParent().y }) {
@@ -272,6 +403,7 @@ fun MainScreen(
                         earthly = earthly, onEarthly = { earthly = it },
                         winScore = ::winScore,
                         wonScore = ::wonScore,
+                        mcr = mcrUi,
                         onBreakdown = { breakdownCard = it },
                     )
                 }
@@ -307,15 +439,25 @@ fun MainScreen(
     val card = breakdownCard
     if (card != null) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+        val done: () -> Unit = {
+            scope.launch { sheetState.hide() }.invokeOnCompletion { breakdownCard = null }
+        }
         ModalBottomSheet(onDismissRequest = { breakdownCard = null }, sheetState = sheetState) {
-            FanBreakdownSheet(
-                card = card,
-                scoreDiscard = winScore(card, selfDrawn = false),
-                scoreSelf = winScore(card, selfDrawn = true),
-                onDone = {
-                    scope.launch { sheetState.hide() }.invokeOnCompletion { breakdownCard = null }
-                },
-            )
+            if (isMCR) {
+                MCRFanBreakdownSheet(
+                    card = card,
+                    scoreDiscard = mcrScore(card, false),
+                    scoreSelf = mcrScore(card, true),
+                    onDone = done,
+                )
+            } else {
+                FanBreakdownSheet(
+                    card = card,
+                    scoreDiscard = winScore(card, selfDrawn = false),
+                    scoreSelf = winScore(card, selfDrawn = true),
+                    onDone = done,
+                )
+            }
         }
     }
 }
@@ -324,7 +466,7 @@ fun MainScreen(
 
 @Composable
 private fun HandSection(viewModel: MahjongViewModel) {
-    val n = viewModel.selectedTiles.size
+    val n = viewModel.handTiles.size
     val (hint, hintColor) = when {
         n == 0 -> tr("选入手牌") to MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         n % 3 == 1 -> tr("可算向听 / 听牌") to Theme.hintGreen
@@ -335,7 +477,7 @@ private fun HandSection(viewModel: MahjongViewModel) {
     SectionCard(
         title = tr("手里的牌"),
         icon = Icons.Filled.GridView,
-        accessory = "${viewModel.selectedTiles.size} / ${viewModel.maxConcealed}",
+        accessory = "${viewModel.handTiles.size} / ${viewModel.maxConcealed}",
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -454,15 +596,16 @@ private fun RecognitionNoticeBanner(notice: String?) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun MeldSection(viewModel: MahjongViewModel) {
+private fun MeldSection(viewModel: MahjongViewModel, isMCR: Boolean) {
     SectionCard(
-        title = tr("桌上的牌（碰 / 杠）"),
+        title = if (isMCR) tr("桌上的牌（吃 / 碰 / 杠）") else tr("桌上的牌（碰 / 杠）"),
         icon = Icons.Filled.Layers,
         accessory = tr("%lld / 4 组", viewModel.melds.size),
     ) {
         if (viewModel.melds.isEmpty()) {
             Text(
-                tr("已碰、已杠的牌放这里：底部切到「碰 / 明杠 / 暗杠」后点牌加入。"),
+                if (isMCR) tr("已吃、已碰、已杠的牌放这里：底部切到「吃 / 碰 / 明杠 / 暗杠」后点牌加入。分析工具不限制只能吃上家。")
+                else tr("已碰、已杠的牌放这里：底部切到「碰 / 明杠 / 暗杠」后点牌加入。"),
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
             )
@@ -497,9 +640,78 @@ private fun ResultSection(
     earthly: Boolean, onEarthly: (Boolean) -> Unit,
     winScore: (MahjongCard, Boolean?) -> WinScore,
     wonScore: (Boolean) -> WinScore,
+    mcr: MCRUiState,
     onBreakdown: (MahjongCard) -> Unit,
 ) {
     val hint = viewModel.hintMessage
+
+    @Composable
+    fun FanChip(titleKey: String, isOn: Boolean, onToggle: (Boolean) -> Unit) {
+        Text(
+            tr(titleKey),
+            fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            color = if (isOn) Theme.accent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            modifier = Modifier
+                .background(
+                    if (isOn) Theme.accent.copy(alpha = 0.16f)
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+                    CircleShape
+                )
+                .border(
+                    1.2.dp,
+                    if (isOn) Theme.accent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                    CircleShape
+                )
+                .clickable { onToggle(!isOn) }
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        )
+    }
+
+    /** 一行国标场景番勾选胶囊 */
+    @Composable
+    fun MCRSpecialFanChips(selfDrawn: Boolean) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                if (selfDrawn) tr("自摸时") else tr("点炮时"),
+                fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                modifier = Modifier.align(Alignment.CenterVertically),
+            )
+            if (selfDrawn) {
+                if (mcr.hasKongMeld) FanChip("杠上开花", mcr.kongBloom, mcr.onKongBloom)
+                FanChip("妙手回春", mcr.lastTileDraw, mcr.onLastTileDraw)
+            } else {
+                FanChip("海底捞月（和最后一张打出的牌）", mcr.lastDiscard, mcr.onLastDiscard)
+                FanChip("抢杠和", mcr.robbingKong, mcr.onRobbingKong)
+            }
+            FanChip("和绝张", mcr.lastTileOfKind, mcr.onLastTileOfKind)
+        }
+    }
+
+    /** 国标：一列「N 分」+ 不够起和提示 */
+    @Composable
+    fun MCRPointsColumn(titleKey: String, score: MCRScore) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                tr(titleKey), fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+            Text(
+                mcrTotalText(score), fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                color = if (score.meetsMinimum) Theme.moneyGreen else Color(0xFFFF9500),
+            )
+            if (!score.meetsMinimum) {
+                Text(
+                    tr("不够起和"), fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFFFF9500),
+                )
+            }
+        }
+    }
 
     @Composable
     fun SpecialFanChips(selfDrawn: Boolean) {
@@ -568,6 +780,39 @@ private fun ResultSection(
     } else if (viewModel.hasAnalyzed) {
         val sh = viewModel.shantenValue ?: 99
         when {
+            sh == -1 && mcr.enabled && !mcr.isFullHand -> {
+                // 国标：牌型能和，但手牌加副露不满 14 张，算不出可信的番分
+                SectionCard(title = tr("牌型成立"), icon = Icons.Filled.CheckCircle) {
+                    Text(
+                        tr("这副牌的牌型能和，但手牌加副露还不满 14 张——缺的面子按「能凑成」处理，所以不算番分。补齐 14 张后才会给出番分与起和判定。"),
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+            }
+            sh == -1 && mcr.enabled -> {
+                // 已和（国标）：番型明细 + 总分 + 起和判定
+                SectionCard(title = tr("已和！"), icon = Icons.Filled.CheckCircle) {
+                    val scoreDiscard = mcr.wonScore(false)
+                    val scoreSelf = mcr.wonScore(true)
+                    MCRSpecialFanChips(selfDrawn = false)
+                    MCRSpecialFanChips(selfDrawn = true)
+                    Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                        MCRPointsColumn("点炮和", scoreDiscard)
+                        MCRPointsColumn("自摸和", scoreSelf)
+                    }
+                    HorizontalDivider()
+                    Text(
+                        scoreDiscard.items.joinToString(" · ") { mcrFanLine(it) },
+                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Theme.moneyGreen,
+                    )
+                    Text(
+                        tr("国标起和 8 分；花牌每张 1 分但不计入起和分。番型明细按「点炮和」列出。"),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                    )
+                }
+            }
             sh == -1 -> {
                 // 已和（3n+2 且成牌）：番型 + 结算金额
                 SectionCard(title = tr("已和！"), icon = Icons.Filled.CheckCircle) {
@@ -582,6 +827,101 @@ private fun ResultSection(
                     Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                         SettleColumn("点炮（放炮者付）", scoreDiscard)
                         SettleColumn("自摸（三家各付）", scoreSelf)
+                    }
+                }
+            }
+            viewModel.discards.isNotEmpty() && mcr.enabled -> {
+                // 打牌建议（国标）：每个候选弃牌 → 弃后听牌 + 各自番分，能到的最高分在前
+                SectionCard(
+                    title = tr("打牌建议"),
+                    icon = Icons.Filled.TouchApp,
+                    accessory = tr("%lld 种", viewModel.discards.size),
+                ) {
+                    val evaluated = mcr.evaluatedDiscards()
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        evaluated.take(6).forEach { e ->
+                            val sug = e.suggestion
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(
+                                        tr("打"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                    )
+                                    MahjongTileChip(card = sug.discard)
+                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        val dead = sug.resultingShanten == 0 && e.waitScores.isEmpty()
+                                        Text(
+                                            when {
+                                                dead -> tr("听牌（空听）")
+                                                sug.resultingShanten == 0 -> tr("听牌")
+                                                else -> tr("向听 %lld", sug.resultingShanten)
+                                            },
+                                            fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                                            color = when {
+                                                dead -> Color(0xFFFF9500)
+                                                sug.resultingShanten == 0 -> Theme.moneyGreen
+                                                else -> MaterialTheme.colorScheme.onSurface
+                                            },
+                                        )
+                                        Text(
+                                            tr("进张 %lld 张 · %lld 门", sug.acceptanceCount, sug.acceptance.size),
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                        )
+                                    }
+                                    if (e.maxPoints >= 0 && mcr.scoringAvailable) {
+                                        Spacer(Modifier.weight(1f))
+                                        val good = e.maxPoints >= MCR_MINIMUM_POINTS
+                                        val tint = if (good) Theme.moneyGreen else Color(0xFFFF9500)
+                                        Text(
+                                            tr("最高 %lld 分", e.maxPoints),
+                                            fontSize = 12.sp, fontWeight = FontWeight.Bold, color = tint,
+                                            modifier = Modifier
+                                                .background(tint.copy(alpha = 0.12f), CircleShape)
+                                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                        )
+                                    }
+                                }
+                                if (e.waitScores.isNotEmpty()) {
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(start = 30.dp),
+                                    ) {
+                                        e.waitScores.forEach { (waitCard, score) ->
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                                            ) {
+                                                MahjongTileChip(card = waitCard)
+                                                if (mcr.scoringAvailable) {
+                                                    Text(
+                                                        tr("%lld 分", score.totalPoints),
+                                                        fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                                        color = if (score.meetsMinimum) Theme.moneyGreen
+                                                        else Color(0xFFFF9500),
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (evaluated.any { it.maxPoints >= 0 }) {
+                        Text(
+                            if (mcr.scoringAvailable) tr("分数按点炮和计；自摸、场景番另加。国标起和 8 分。")
+                            else tr("手牌加副露不满 14 张，缺的面子按「能凑成」处理，所以只排向听/进张，不算番分。"),
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                        )
                     }
                 }
             }
@@ -643,18 +983,22 @@ private fun ResultSection(
                                 onClick = { onShowSelfDrawChange(false) },
                                 shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
                                 icon = {},
-                                label = { Text(tr("点炮")) },
+                                label = { Text(if (mcr.enabled) tr("点炮和") else tr("点炮")) },
                             )
                             SegmentedButton(
                                 selected = showSelfDraw,
                                 onClick = { onShowSelfDrawChange(true) },
                                 shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
                                 icon = {},
-                                label = { Text(tr("自摸")) },
+                                label = { Text(if (mcr.enabled) tr("自摸和") else tr("自摸")) },
                             )
                         }
 
-                        SpecialFanChips(selfDrawn = showSelfDraw)
+                        if (mcr.enabled) {
+                            if (mcr.scoringAvailable) MCRSpecialFanChips(selfDrawn = showSelfDraw)
+                        } else {
+                            SpecialFanChips(selfDrawn = showSelfDraw)
+                        }
 
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -662,29 +1006,58 @@ private fun ResultSection(
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             viewModel.waitingTiles.forEach { card ->
-                                val score = winScore(card, null)
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.spacedBy(3.dp),
                                 ) {
-                                    MahjongTileChip(card = card, onTap = { onBreakdown(card) }, large = true)
-                                    Text(
-                                        tr("%lld 番", score.totalFan),
-                                        fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                    MahjongTileChip(
+                                        card = card,
+                                        onTap = { if (!mcr.enabled || mcr.scoringAvailable) onBreakdown(card) },
+                                        large = true,
                                     )
-                                    Text(
-                                        moneyText(score.money),
-                                        fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                                        color = Theme.moneyGreen,
-                                    )
+                                    if (mcr.enabled) {
+                                        if (mcr.scoringAvailable) {
+                                            val score = mcr.score(card, null)
+                                            Text(
+                                                tr("%lld 分", score.totalPoints),
+                                                fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                                                color = if (score.meetsMinimum) Theme.moneyGreen
+                                                else Color(0xFFFF9500),
+                                            )
+                                            if (!score.meetsMinimum) {
+                                                Text(
+                                                    tr("不够起和"),
+                                                    fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+                                                    color = Color(0xFFFF9500),
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        val score = winScore(card, null)
+                                        Text(
+                                            tr("%lld 番", score.totalFan),
+                                            fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                        )
+                                        Text(
+                                            moneyText(score.money),
+                                            fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                                            color = Theme.moneyGreen,
+                                        )
+                                    }
                                 }
                             }
                         }
 
                         Text(
-                            if (showSelfDraw) tr("金额为单家：自摸后三家各付这个数。点牌可看番型明细。")
-                            else tr("金额为单家：点炮时放炮那家付这个数。点牌可看番型明细。"),
+                            when {
+                                mcr.enabled && mcr.scoringAvailable ->
+                                    tr("国标起和 8 分：橙色的听牌即使和了也不够起和。点牌可看番型明细。")
+                                mcr.enabled ->
+                                    tr("手牌加副露不满 13 张，缺的面子按「能凑成」处理，所以这里只列听牌不算番分。")
+                                showSelfDraw -> tr("金额为单家：自摸后三家各付这个数。点牌可看番型明细。")
+                                else -> tr("金额为单家：点炮时放炮那家付这个数。点牌可看番型明细。")
+                            },
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                         )
@@ -701,7 +1074,7 @@ private fun ResultSection(
                 ) {
                     if (viewModel.acceptance.isEmpty()) {
                         Text(
-                            tr("无有效进张（受缺一门所限）。"),
+                            if (mcr.enabled) tr("无有效进张。") else tr("无有效进张（受缺一门所限）。"),
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         )
@@ -732,7 +1105,8 @@ private fun ResultSection(
     } else {
         SectionCard(title = tr("分析结果"), icon = Icons.Filled.Help) {
             Text(
-                tr("选牌后点「分析手牌」：手牌 3n+1 张算听牌/向听，3n+2 张给打牌建议；已碰、已杠的牌用底部「碰 / 明杠 / 暗杠」加到桌上。"),
+                if (mcr.enabled) tr("选牌后点「分析手牌」：手牌 3n+1 张算听牌/向听，3n+2 张给打牌建议；已吃、已碰、已杠的牌用底部「吃 / 碰 / 明杠 / 暗杠」加到桌上；风牌箭牌花牌在键盘上手动补入。")
+                else tr("选牌后点「分析手牌」：手牌 3n+1 张算听牌/向听，3n+2 张给打牌建议；已碰、已杠的牌用底部「碰 / 明杠 / 暗杠」加到桌上。"),
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
             )
@@ -808,12 +1182,121 @@ private fun FanBreakdownSheet(
     }
 }
 
+// MARK: 番型明细（国标）
+
+@Composable
+private fun MCRFanBreakdownSheet(
+    card: MahjongCard,
+    scoreDiscard: MCRScore,
+    scoreSelf: MCRScore,
+    onDone: () -> Unit,
+) {
+    var explainName by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 24.dp)
+            .navigationBarsPadding(),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(Modifier.fillMaxWidth()) {
+            Text(
+                tr("番型明细"), fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.Center),
+            )
+            TextButton(onClick = onDone, modifier = Modifier.align(Alignment.CenterEnd)) {
+                Text(tr("完成"))
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            MahjongTileChip(card = card, large = true)
+            Text(tr("和「%@」", card.displayText), fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        }
+
+        Text(
+            tr("番分"), fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+
+        @Composable
+        fun pointsRow(titleKey: String, score: MCRScore) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(tr(titleKey), fontSize = 15.sp)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    mcrTotalText(score), fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    color = if (score.meetsMinimum) Theme.moneyGreen else Color(0xFFFF9500),
+                )
+            }
+        }
+        pointsRow("点炮和", scoreDiscard)
+        pointsRow("自摸和", scoreSelf)
+        Text(
+            tr("国标起和 8 分；花牌每张 1 分但不计入起和分。"),
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+        )
+
+        HorizontalDivider()
+        Text(
+            tr("番型（按点炮和）· 点番型看含义"), fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+        scoreDiscard.items.forEach { item ->
+            val info = MCRFanInfo.table[item.name]
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .let { m ->
+                            if (info != null) m.clickable {
+                                explainName = if (explainName == item.name) null else item.name
+                            } else m
+                        },
+                ) {
+                    Text(localizedFanName(MCRFanInfo.displayKey(item.name)), fontSize = 15.sp)
+                    if (item.count > 1) {
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "×${item.count}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        )
+                    }
+                    if (info != null) {
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            Icons.Filled.Info, contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                            modifier = Modifier.size(13.dp),
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        tr("%lld 分", item.fan), fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+                if (info != null && explainName == item.name) {
+                    Text(
+                        tr(info), fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    )
+                }
+            }
+        }
+    }
+}
+
 // MARK: 底部：操作 + 键盘
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BottomKeyboard(
     viewModel: MahjongViewModel,
+    gameMode: GameMode,
     keyboardSuit: MahjongCard.Suit,
     onSuitChange: (MahjongCard.Suit) -> Unit,
     inputTarget: InputTarget,
@@ -822,8 +1305,10 @@ private fun BottomKeyboard(
 ) {
     fun keyboardCanAdd(card: MahjongCard): Boolean {
         val kind = inputTarget.meldKind
-        return if (kind != null) viewModel.canAddMeld(kind, card)
-        else viewModel.canAddMore && viewModel.usedCount(card) < 4
+        if (kind != null) return viewModel.canAddMeld(kind, card)
+        // 花牌不占手牌名额（手牌满了也还能补花），每种只有一张
+        if (card.suit.isFlower) return gameMode.isMCR && viewModel.usedCount(card) < 1
+        return viewModel.canAddMore && viewModel.usedCount(card) < 4
     }
 
     Column(
@@ -857,12 +1342,13 @@ private fun BottomKeyboard(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
                 Spacer(Modifier.weight(1f))
-                SingleChoiceSegmentedButtonRow(Modifier.width(270.dp)) {
-                    InputTarget.entries.forEachIndexed { i, target ->
+                val targets = InputTarget.casesFor(gameMode)
+                SingleChoiceSegmentedButtonRow(Modifier.width(if (gameMode.isMCR) 320.dp else 270.dp)) {
+                    targets.forEachIndexed { i, target ->
                         SegmentedButton(
                             selected = inputTarget == target,
                             onClick = { onTargetChange(target) },
-                            shape = SegmentedButtonDefaults.itemShape(index = i, count = InputTarget.entries.size),
+                            shape = SegmentedButtonDefaults.itemShape(index = i, count = targets.size),
                             label = { Text(tr(target.raw), fontSize = 12.sp, maxLines = 1) },
                             icon = {},
                         )
@@ -872,7 +1358,7 @@ private fun BottomKeyboard(
 
             // 花色选择
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MahjongCard.Suit.displayOrder.forEach { suit ->
+                gameMode.suits.forEach { suit ->
                     val selected = keyboardSuit == suit
                     val color = Theme.suitColor(suit)
                     Box(
@@ -900,33 +1386,55 @@ private fun BottomKeyboard(
                 }
             }
 
-            // 9 个点数键
+            if (inputTarget == InputTarget.CHOW) {
+                Text(
+                    tr("吃：点起始牌，自动配成连续三张（如点「3万」= 吃 345 万）。分析工具不限制只能吃上家。"),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                )
+            }
+
+            // 点数键（数牌 9 个；风 4 个、箭 3 个、花 8 个，右侧补空位撑住等宽布局）
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                (1..9).forEach { r ->
+                (1..keyboardSuit.rankCount).forEach { r ->
                     val card = MahjongCard(keyboardSuit, r)
-                    val enabled = keyboardCanAdd(card)
-                    Image(
-                        painter = painterResource(tileDrawable(card)),
-                        contentDescription = card.displayTextCompact,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(52.dp)
-                            .alpha(if (enabled) 1f else 0.35f)
-                            .clip(RoundedCornerShape(7.dp))
-                            .border(1.dp, Color.Black.copy(alpha = 0.28f), RoundedCornerShape(7.dp))
-                            .clickable(enabled = enabled) {
-                                val kind = inputTarget.meldKind
-                                if (kind != null) {
-                                    viewModel.addMeld(kind, card)
-                                    onTargetChange(InputTarget.HAND)
-                                } else {
-                                    viewModel.addCard(card)
-                                }
-                            },
-                        contentScale = ContentScale.Fit,
-                    )
+                    KeyboardTileKey(card, keyboardCanAdd(card)) {
+                        val kind = inputTarget.meldKind
+                        if (kind != null) {
+                            viewModel.addMeld(kind, card)
+                            onTargetChange(InputTarget.HAND)
+                        } else {
+                            viewModel.addCard(card)
+                        }
+                    }
+                }
+                repeat(9 - keyboardSuit.rankCount) {
+                    Spacer(Modifier.weight(1f).height(52.dp))
                 }
             }
         }
+    }
+}
+
+/** 键盘上的一张牌：数牌用牌面图，字牌/花牌用文字牌面 */
+@Composable
+private fun RowScope.KeyboardTileKey(card: MahjongCard, enabled: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(7.dp)
+    val box = Modifier
+        .weight(1f)
+        .height(52.dp)
+        .alpha(if (enabled) 1f else 0.35f)
+        .clip(shape)
+        .border(1.dp, Color.Black.copy(alpha = 0.28f), shape)
+        .clickable(enabled = enabled, onClick = onClick)
+    if (card.hasImageAsset) {
+        Image(
+            painter = painterResource(tileDrawable(card)),
+            contentDescription = card.displayTextCompact,
+            modifier = box,
+            contentScale = ContentScale.Fit,
+        )
+    } else {
+        TileFaceText(card, 52.dp, box)
     }
 }
