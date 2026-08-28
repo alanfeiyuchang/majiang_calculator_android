@@ -604,7 +604,7 @@ private fun MeldSection(viewModel: MahjongViewModel, isMCR: Boolean) {
     ) {
         if (viewModel.melds.isEmpty()) {
             Text(
-                if (isMCR) tr("已吃、已碰、已杠的牌放这里：底部切到「吃 / 碰 / 明杠 / 暗杠」后点牌加入。分析工具不限制只能吃上家。")
+                if (isMCR) tr("已吃、已碰、已杠的牌放这里：底部切到「吃 / 碰 / 明杠 / 暗杠」后点牌加入。吃只能吃上家，但本工具不强制这一条——请自行确认这副吃是合法的。")
                 else tr("已碰、已杠的牌放这里：底部切到「碰 / 明杠 / 暗杠」后点牌加入。"),
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
@@ -1105,7 +1105,7 @@ private fun ResultSection(
     } else {
         SectionCard(title = tr("分析结果"), icon = Icons.Filled.Help) {
             Text(
-                if (mcr.enabled) tr("选牌后点「分析手牌」：手牌 3n+1 张算听牌/向听，3n+2 张给打牌建议；已吃、已碰、已杠的牌用底部「吃 / 碰 / 明杠 / 暗杠」加到桌上；风牌箭牌花牌在键盘上手动补入。")
+                if (mcr.enabled) tr("选牌后点「分析手牌」：手牌 3n+1 张算听牌/向听，3n+2 张给打牌建议；已吃、已碰、已杠的牌用底部「吃 / 碰 / 明杠 / 暗杠」加到桌上。国标起和 8 分，花牌另计不进起和分。")
                 else tr("选牌后点「分析手牌」：手牌 3n+1 张算听牌/向听，3n+2 张给打牌建议；已碰、已杠的牌用底部「碰 / 明杠 / 暗杠」加到桌上。"),
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
@@ -1241,8 +1241,12 @@ private fun MCRFanBreakdownSheet(
 
         HorizontalDivider()
         Text(
-            tr("番型（按点炮和）· 点番型看含义"), fontSize = 13.sp,
+            tr("番型（按点炮和）"), fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+        Text(
+            tr("点番型看含义"), fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
         )
         scoreDiscard.items.forEach { item ->
             val info = MCRFanInfo.table[item.name]
