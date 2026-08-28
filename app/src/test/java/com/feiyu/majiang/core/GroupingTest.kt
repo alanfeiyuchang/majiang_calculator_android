@@ -7,6 +7,7 @@
 
 package com.feiyu.majiang.core
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -290,5 +291,95 @@ class GroupingTest {
     @Test fun z4_wideStripStillZooms() {
         val strip = listOf(GeoRect(100f, 1400f, 3700f, 120f))
         assertTrue("Z4 横条区域→仍放大", zoomRegion(strip, 4000f, 3000f) != null)
+    }
+
+    // ---- 吃（国标），与 iOS Tests/GroupingTests.swift 的 C1–C9 逐条对应 ----
+
+    @Test fun c1_mcrSingleChow() {
+        val hand = lay(cards(listOf("1m","2m","4m","5m","7m","8m","1p","2p","4p","5p")), 0f)
+        val chow = lay(cards(listOf("4s","5s","6s")), hand.second + 40f)
+        val r = groupTiles(hand.first + chow.first, GameMode.MCR)
+        assertEquals(listOf("吃四条"), r.melds.map { meldDesc(it) })
+        assertEquals(10, r.hand.size)
+        assertEquals(13, r.effectiveTileCount)
+    }
+
+    @Test fun c2_sichuanHasNoChow() {
+        val hand = lay(cards(listOf("1m","2m","4m","5m","7m","8m","1p","2p","4p","5p")), 0f)
+        val chow = lay(cards(listOf("4s","5s","6s")), hand.second + 40f)
+        val r = groupTiles(hand.first + chow.first, GameMode.SICHUAN)
+        assertTrue("川麻不该认出吃：${r.melds.map { meldDesc(it) }}", r.melds.isEmpty())
+        assertEquals(13, r.hand.size)
+    }
+
+    @Test fun c3_chowOutOfOrder() {
+        val hand = lay(cards(listOf("1m","2m","4m","5m","7m","8m","1p","2p","4p","5p")), 0f)
+        val chow = lay(cards(listOf("5s","4s","6s")), hand.second + 40f)
+        val r = groupTiles(hand.first + chow.first, GameMode.MCR)
+        assertEquals(listOf("吃四条"), r.melds.map { meldDesc(it) })
+    }
+
+    @Test fun c4_twoChowsInOneCluster() {
+        val hand = lay(cards(listOf("1m","2m","4m","5m","7m","9m","1p")), 0f)
+        val two = lay(cards(listOf("1s","2s","3s","7p","8p","9p")), hand.second + 40f)
+        val r = groupTiles(hand.first + two.first, GameMode.MCR)
+        assertEquals(listOf("吃一条","吃七筒"), r.melds.map { meldDesc(it) })
+        assertEquals(13, r.effectiveTileCount)
+    }
+
+    @Test fun c5_pongAndChowSameCluster() {
+        val hand = lay(cards(listOf("1m","2m","4m","5m","7m","9m","1p")), 0f)
+        val mix = lay(cards(listOf("5p","5p","5p","1s","2s","3s")), hand.second + 40f)
+        val r = groupTiles(hand.first + mix.first, GameMode.MCR)
+        assertEquals(listOf("碰五筒","吃一条"), r.melds.map { meldDesc(it) })
+    }
+
+    @Test fun c6_kongBeatsPong() {
+        val hand = lay(cards(listOf("1m","2m","4m","5m","7m","9m","1p","2p","4p","5p")), 0f)
+        val kong = lay(cards(listOf("8s","8s","8s","8s")), hand.second + 40f)
+        val r = groupTiles(hand.first + kong.first, GameMode.MCR)
+        assertEquals(listOf("明杠八条"), r.melds.map { meldDesc(it) })
+    }
+
+    @Test fun c7_crossSuitRunIsNotChow() {
+        val hand = lay(cards(listOf("1m","2m","4m","5m","7m","8m","1p","2p","4p","5p")), 0f)
+        val bad = lay(cards(listOf("4m","5m","6p")), hand.second + 40f)
+        val r = groupTiles(hand.first + bad.first, GameMode.MCR)
+        assertTrue("跨花色不该成吃：${r.melds.map { meldDesc(it) }}", r.melds.isEmpty())
+    }
+
+    @Test fun c8_honorsHaveNoChow() {
+        val hand = lay(cards(listOf("1m","2m","4m","5m","7m","8m","1p","2p","4p","5p")), 0f)
+        val honors = listOf(
+            MahjongCard(MahjongCard.Suit.FENG, 1),
+            MahjongCard(MahjongCard.Suit.FENG, 2),
+            MahjongCard(MahjongCard.Suit.FENG, 3),
+        )
+        val h = lay(honors, hand.second + 40f)
+        val r = groupTiles(hand.first + h.first, GameMode.MCR)
+        assertTrue("东南西不该成吃：${r.melds.map { meldDesc(it) }}", r.melds.isEmpty())
+    }
+
+    @Test fun c9_pairIsNotTwoConcealedKongs() {
+        val hand = lay(cards(listOf("1m","2m","4m","5m","7m","8m","1p","2p","4p","5p","3s")), 0f)
+        val pair = lay(cards(listOf("3p","3p")), hand.second + 40f)
+        val r = groupTiles(hand.first + pair.first, GameMode.MCR)
+        assertTrue("两张同牌不该拆成两个暗杠：${r.melds.map { meldDesc(it) }}",
+                   r.melds.none { it.kind == Meld.Kind.CONCEALED_KONG })
+    }
+
+    // ---- 花牌（国标）：不进手牌、不占 13/14 名额 ----
+
+    @Test fun f1_flowersAreSetAside() {
+        val hand = lay(cards(listOf("1m","2m","4m","5m","7m","8m","1p","2p","4p","5p","7p","8p","1s")), 0f)
+        val flowers = lay(
+            listOf(MahjongCard(MahjongCard.Suit.HUA, 1), MahjongCard(MahjongCard.Suit.HUA, 4)),
+            hand.second + 40f,
+        )
+        val r = groupTiles(hand.first + flowers.first, GameMode.MCR)
+        assertEquals(2, r.flowers.size)
+        assertEquals(13, r.hand.size)
+        assertEquals(13, r.effectiveTileCount)   // 花牌不计入
+        assertTrue(r.hasValidTileCount)
     }
 }

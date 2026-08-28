@@ -30,8 +30,13 @@ data class RecognitionResult(
     val hand: List<MahjongCard>,
     val melds: List<Meld>,
     val guessedConcealedKong: Boolean,
+    /** 花牌（国标）。花牌摆在一边、不参与和牌，因此**不进** hand，也不计入张数不变量。 */
+    val flowers: List<MahjongCard> = emptyList(),
 ) {
-    /** 换算成「手牌张数」：一组副露占 3 张名额。合法值为 13（未摸牌）或 14（已摸牌） */
+    /**
+     * 换算成「手牌张数」：一组副露占 3 张名额。合法值为 13（未摸牌）或 14（已摸牌）。
+     * 花牌不算——国标里花牌是额外亮出来的，13/14 张之外。
+     */
     val effectiveTileCount: Int get() = hand.size + 3 * melds.size
     val hasValidTileCount: Boolean get() = effectiveTileCount == 13 || effectiveTileCount == 14
 }
@@ -68,14 +73,23 @@ fun referenceTileHeight(heights: List<Float>): Float {
  * 「单张 = 暗杠」这条猜测会让几乎任何簇都能「解析成副露」，实拍里因此凭空造出
  * 好几组暗杠、张数暴涨。张数对不上时再试着猜——只有这样能让 13/14 成立才采纳。
  */
-fun groupTiles(boxes: List<TileBox>): RecognitionResult {
-    val strict = group(boxes, guessConcealedKong = false)
+fun groupTiles(boxes: List<TileBox>, mode: GameMode = GameMode.SICHUAN): RecognitionResult {
+    // 花牌先摘出去再聚类。花牌不参与和牌、也不占 13/14 的名额，
+    // 留在里面会把「手牌簇」撑大、还会让张数不变量永远对不上。
+    // 它们通常也不和手牌摆在一排（亮在自己面前），本来就不该和手牌聚成一簇。
+    val flowers = boxes.filter { it.card.suit.isFlower }.sortedBy { it.minX }.map { it.card }
+    val playable = boxes.filter { !it.card.suit.isFlower }
+    return groupPlayable(playable, mode).copy(flowers = flowers)
+}
+
+private fun groupPlayable(boxes: List<TileBox>, mode: GameMode): RecognitionResult {
+    val strict = group(boxes, guessConcealedKong = false, mode = mode)
     if (strict.hasValidTileCount) return strict
-    val lenient = group(boxes, guessConcealedKong = true)
+    val lenient = group(boxes, guessConcealedKong = true, mode = mode)
     return if (lenient.hasValidTileCount) lenient else strict
 }
 
-private fun group(boxes: List<TileBox>, guessConcealedKong: Boolean): RecognitionResult {
+private fun group(boxes: List<TileBox>, guessConcealedKong: Boolean, mode: GameMode): RecognitionResult {
     if (boxes.isEmpty()) return RecognitionResult(emptyList(), emptyList(), false)
 
     // ① 分行
@@ -113,7 +127,7 @@ private fun group(boxes: List<TileBox>, guessConcealedKong: Boolean): Recognitio
 
     // ③ 每个簇先试着解析成副露；解析不成的才可能是手牌。
     //    （手牌里混着单张和顺子，解析必然失败；整齐的 3/4 张同牌则会解析成功。）
-    val parsed = clusters.map { parseMeldRuns(it.sortedBy { b -> b.minX }.map { b -> b.card }, guessConcealedKong) }
+    val parsed = clusters.map { parseMeldRuns(it.sortedBy { b -> b.minX }.map { b -> b.card }, guessConcealedKong, mode.isMCR) }
     val handCandidates = clusters.indices.filter { parsed[it] == null }
     val pool = if (handCandidates.isEmpty()) clusters.indices.toList() else handCandidates
 
@@ -154,31 +168,65 @@ private fun group(boxes: List<TileBox>, guessConcealedKong: Boolean): Recognitio
  * 单张只有在 guessConcealedKong = true 时才算「只露一张的暗杠」，否则让整簇解析失败。
  * 出现 2 张同牌等认不准的段、或整簇没有一个 3/4 张的段，返回 null（交给调用方并回手牌）。
  */
-private fun parseMeldRuns(cards: List<MahjongCard>, guessConcealedKong: Boolean): List<Meld>? {
+/** 三张能不能凑成一副吃：同花色、数牌、点数连号。摆放次序不限（有人会摆成 5-4-6）。 */
+private fun chowStart(three: List<MahjongCard>): MahjongCard? {
+    if (three.size != 3) return null
+    val suit = three[0].suit
+    // 字牌没有顺子；花牌更不参与（这里本来也摘掉了）
+    if (suit != MahjongCard.Suit.WAN && suit != MahjongCard.Suit.TONG && suit != MahjongCard.Suit.TIAO) return null
+    if (three.any { it.suit != suit }) return null
+    val ranks = three.map { it.rank }.sorted()
+    if (ranks[1] != ranks[0] + 1 || ranks[2] != ranks[1] + 1) return null
+    return MahjongCard(suit, ranks[0])
+}
+
+/**
+ * 把一簇牌解析成若干副露。
+ *
+ * 从左往右**贪心消费**，而不是「按相同牌分段」——因为吃是三张不同的牌，
+ * 分段法根本表达不了。桌上的副露本来就是一副挨一副摆的，位置次序就是分组依据。
+ *
+ * 匹配优先级：4 张同牌（杠）→ 3 张同牌（碰）→ 3 张连号（吃）。
+ * 杠排在碰前面，否则 4 张同牌会被吃掉前 3 张当成碰、剩一张落单。
+ *
+ * @param allowChow 只有国标开。川麻无吃，开了会把手牌里的顺子误判成副露。
+ */
+private fun parseMeldRuns(
+    cards: List<MahjongCard>,
+    guessConcealedKong: Boolean,
+    allowChow: Boolean,
+): List<Meld>? {
     // 只露一张的暗杠：整簇就一张牌。仅在允许猜的时候成立。
     if (guessConcealedKong && cards.size == 1) {
         return listOf(Meld(Meld.Kind.CONCEALED_KONG, cards[0]))
     }
 
-    val runs = mutableListOf<MutableList<MahjongCard>>()
-    for (c in cards) {
-        val last = runs.lastOrNull()
-        if (last != null && last.last() == c) last.add(c) else runs.add(mutableListOf(c))
-    }
-    if (runs.none { it.size == 3 || it.size == 4 }) return null
-
     val melds = mutableListOf<Meld>()
-    for (run in runs) {
-        when (run.size) {
-            3 -> melds.add(Meld(Meld.Kind.PONG, run[0]))
-            4 -> melds.add(Meld(Meld.Kind.EXPOSED_KONG, run[0]))
-            1 -> {
-                if (!guessConcealedKong) return null   // 不猜暗杠时，单张让整簇解析失败
-                melds.add(Meld(Meld.Kind.CONCEALED_KONG, run[0]))
-            }
-            else -> return null
+    var sawRealMeld = false      // 是否见到「实打实 3/4 张」的一副，而不是靠猜的暗杠
+    var i = 0
+    while (i < cards.size) {
+        val rest = cards.size - i
+        if (rest >= 4 && cards[i] == cards[i + 1] && cards[i] == cards[i + 2] && cards[i] == cards[i + 3]) {
+            melds.add(Meld(Meld.Kind.EXPOSED_KONG, cards[i])); sawRealMeld = true; i += 4; continue
         }
+        if (rest >= 3 && cards[i] == cards[i + 1] && cards[i] == cards[i + 2]) {
+            melds.add(Meld(Meld.Kind.PONG, cards[i])); sawRealMeld = true; i += 3; continue
+        }
+        if (allowChow && rest >= 3) {
+            val start = chowStart(cards.subList(i, i + 3))
+            if (start != null) {
+                melds.add(Meld(Meld.Kind.CHOW, start)); sawRealMeld = true; i += 3; continue
+            }
+        }
+        // 并排两张同牌凑不成任何一副。别把它拆成两个「暗杠」——
+        // 那正是实拍里凭空造出成堆杠的老毛病。
+        if (rest >= 2 && cards[i] == cards[i + 1]) return null
+        if (!guessConcealedKong) return null      // 不猜暗杠时，落单让整簇解析失败
+        melds.add(Meld(Meld.Kind.CONCEALED_KONG, cards[i])); i += 1
     }
+
+    // 至少要有一副真看见 3/4 张的。整簇全是「猜出来的暗杠」不作数。
+    if (!sawRealMeld) return null
     return melds
 }
 

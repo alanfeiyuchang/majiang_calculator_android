@@ -198,7 +198,10 @@ val EN_STRINGS: Map<String, String> = mapOf(
     "四暗刻" to "Four Concealed Pungs",
     "四杠" to "Four Kongs",
     "国标不按底分翻倍算钱，只算番分，起和 8 分。花牌每张 1 分，不计入起和分。拍照识别只认万/筒/条，风牌、箭牌、花牌需手动补入。" to "MCR scores points rather than doubling a base stake; you need 8 points to win. Each flower is worth 1 point but does not count toward the 8. Photo recognition only reads characters/dots/bamboo — winds, dragons and flowers must be added by hand.",
-    "国标模式：拍照只能识别万/筒/条，风牌、箭牌、花牌认不出来，请在键盘上手动补入。" to "MCR: photo recognition only reads characters/dots/bamboo. Winds, dragons and flowers are not recognised — add them with the keypad.",
+    "国标模式：吃靠「摆得分开」认，和手牌里的顺子容易判错边；平摊的风牌也容易认错，请核对后再算。" to
+        "MCR: chow melds are identified by being set apart, so runs held in hand can be misassigned; winds lying flat are also easily misread. Please double-check before analyzing.",
+    "听牌计算器 · 川麻" to "Tenpai Calculator · Sichuan",
+    "切换玩法" to "Switch game type",
     "国标起和 8 分：一副牌的番分（不含花牌）达到 8 分才能和。番型之间遵守不重复计算原则——已经被高番型「包含」的低番型不再另计。" to "MCR needs 8 points to win, flowers excluded. Fan types follow the non-repeat principle: a lower fan already implied by a higher one is not counted again.",
     "国标起和 8 分：橙色的听牌即使和了也不够起和。点牌可看番型明细。" to "MCR needs 8 points to win — waits shown in orange would not reach it. Tap a tile for the fan breakdown.",
     "国标起和 8 分；花牌每张 1 分但不计入起和分。" to "MCR needs 8 points to win. Each flower scores 1 point but does not count toward the 8.",

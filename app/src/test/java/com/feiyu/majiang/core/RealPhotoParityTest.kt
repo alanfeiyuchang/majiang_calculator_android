@@ -24,16 +24,29 @@ class RealPhotoParityTest {
         "8C", "8D", "9B", "9C", "9D", "EW", "GD", "NW", "RD", "SW", "WD", "WW"
     )
 
-    private fun cardFor(classId: Int): MahjongCard? {
+    private val honorRanks = mapOf(
+        "EW" to (MahjongCard.Suit.FENG to 1), "SW" to (MahjongCard.Suit.FENG to 2),
+        "WW" to (MahjongCard.Suit.FENG to 3), "NW" to (MahjongCard.Suit.FENG to 4),
+        "RD" to (MahjongCard.Suit.JIAN to 1), "GD" to (MahjongCard.Suit.JIAN to 2),
+        "WD" to (MahjongCard.Suit.JIAN to 3),
+    )
+    private val flowerRanks = intArrayOf(5, 6, 8, 7)
+
+    private fun cardFor(classId: Int, includeHonors: Boolean): MahjongCard? {
         if (classId < 0 || classId >= classNames.size) return null
         val name = classNames[classId]
         if (name.length != 2) return null
+        honorRanks[name]?.let { (suit, rank) ->
+            return if (includeHonors) MahjongCard(suit, rank) else null
+        }
         val rank = name[0].digitToIntOrNull() ?: return null
         if (rank !in 1..9) return null
         return when (name[1]) {
             'C' -> MahjongCard(MahjongCard.Suit.WAN, rank)
             'D' -> MahjongCard(MahjongCard.Suit.TONG, rank)
             'B' -> MahjongCard(MahjongCard.Suit.TIAO, rank)
+            'S' -> if (includeHonors) MahjongCard(MahjongCard.Suit.HUA, rank) else null
+            'F' -> if (includeHonors) MahjongCard(MahjongCard.Suit.HUA, flowerRanks[rank - 1]) else null
             else -> null
         }
     }
@@ -58,9 +71,9 @@ class RealPhotoParityTest {
     private fun rects(dets: List<FloatArray>): List<GeoRect> =
         dets.map { GeoRect(it[0] * imgW, it[1] * imgH, it[2] * imgW, it[3] * imgH) }
 
-    private fun boxes(dets: List<FloatArray>): List<TileBox> =
+    private fun boxes(dets: List<FloatArray>, includeHonors: Boolean = false): List<TileBox> =
         dets.filter { it[4] >= 0.5f }.mapNotNull { d ->
-            cardFor(d[5].toInt())?.let { c ->
+            cardFor(d[5].toInt(), includeHonors)?.let { c ->
                 val x = d[0] * imgW
                 val y = d[1] * imgH
                 val w = d[2] * imgW
@@ -76,10 +89,19 @@ class RealPhotoParityTest {
             r.x / imgW, r.y / imgH, r.width / imgW, r.height / imgH
         )
 
+    /** 数牌打「4筒」，字牌/花牌打汉字——和 Swift 侧的 desc() 一致 */
+    private fun desc(c: MahjongCard): String = when (c.suit) {
+        MahjongCard.Suit.WAN, MahjongCard.Suit.TONG, MahjongCard.Suit.TIAO ->
+            "${c.rank}${c.suit.raw}"
+        else -> c.rankHanDigit
+    }
+
     private fun fmtGroup(g: RecognitionResult): String {
-        val hand = g.hand.joinToString(" ") { "${it.rank}${it.suit.raw}" }
-        val melds = g.melds.joinToString(" ") { "${it.kind.raw}:${it.card.rank}${it.card.suit.raw}" }
-        return "hand=[$hand] melds=[$melds] guessed=${g.guessedConcealedKong} valid=${g.hasValidTileCount}"
+        val hand = g.hand.joinToString(" ") { desc(it) }
+        val melds = g.melds.joinToString(" ") { "${it.kind.raw}:${desc(it.card)}" }
+        val flowers = g.flowers.joinToString(" ") { desc(it) }
+        return "hand=[$hand] melds=[$melds] flowers=[$flowers] " +
+            "guessed=${g.guessedConcealedKong} valid=${g.hasValidTileCount}"
     }
 
     // ---- 期望值：iOS TileGrouping.swift 在同一份输入上的输出 ----
@@ -100,18 +122,18 @@ class RealPhotoParityTest {
     )
 
     private val expectedGroup = mapOf(
-        "01" to "hand=[2万 2万 6万 7万 8万 8万 7条 7条 8条 8条] melds=[碰:4条] guessed=false valid=true",
-        "02" to "hand=[2万 2万 2万 4条 4条 6条 4筒 2条 9筒 8万 7万 8万 9万 7条 7条 8条 8条] melds=[] guessed=false valid=false",
-        "03" to "hand=[5万 7万 3万 2万 2万 3万 4条 4条 4条 8条 8条 8条 8条 7条] melds=[] guessed=false valid=true",
-        "04" to "hand=[4条 6条 7万 7万 6万] melds=[暗杠:7条 碰:3万 明杠:8条] guessed=true valid=true",
-        "05" to "hand=[2筒 4筒 5筒 6筒] melds=[明杠:1筒 碰:4条 明杠:8条] guessed=false valid=true",
-        "06" to "hand=[1筒 1筒 1筒 2筒 4筒 5筒 6筒 6条 6条 6条 8条 8条 8条 5万 6条 1筒 2条 8条] melds=[] guessed=false valid=false",
-        "07" to "hand=[4筒 5筒 6筒 7筒 8筒 6条 6条 8条 8条 8条 6条 8条 6条 1筒] melds=[碰:1筒] guessed=false valid=false",
-        "08" to "hand=[4筒 5筒 6筒 7筒 8筒 4条 4条 3筒 6条 5筒 1筒 2筒 8条] melds=[碰:1筒 碰:8条] guessed=false valid=false",
-        "09" to "hand=[4筒 4筒 5筒 5筒 6筒 7筒 8筒 1筒 2条 7条 2筒 8条] melds=[碰:1筒 碰:8条] guessed=false valid=false",
-        "10" to "hand=[4筒 4筒 4筒 4筒 5筒 5筒 5筒 6筒 7筒 8筒 7条 1条 1筒 2条 6条 2筒 8条] melds=[碰:1筒] guessed=false valid=false",
-        "11" to "hand=[3筒 4筒 4筒 4筒 6筒 7筒 8筒 1筒 2条 6条 4筒 8条] melds=[碰:1筒 碰:5筒] guessed=false valid=false",
-        "12" to "hand=[4万 5万 6万 7万 7万 8万 8万 4筒 4筒 4筒 6筒 7筒 8筒 1筒 9条 6条 4筒 7条 4筒 8条] melds=[] guessed=false valid=false",
+        "01" to "hand=[2万 2万 6万 7万 8万 8万 7条 7条 8条 8条] melds=[碰:4条] flowers=[] guessed=false valid=true",
+        "02" to "hand=[2万 2万 2万 4条 4条 6条 4筒 2条 9筒 8万 7万 8万 9万 7条 7条 8条 8条] melds=[] flowers=[] guessed=false valid=false",
+        "03" to "hand=[5万 7万 3万 2万 2万 3万 4条 4条 4条 8条 8条 8条 8条 7条] melds=[] flowers=[] guessed=false valid=true",
+        "04" to "hand=[4条 6条 7万 7万 6万] melds=[暗杠:7条 碰:3万 明杠:8条] flowers=[] guessed=true valid=true",
+        "05" to "hand=[2筒 4筒 5筒 6筒] melds=[明杠:1筒 碰:4条 明杠:8条] flowers=[] guessed=false valid=true",
+        "06" to "hand=[1筒 1筒 1筒 2筒 4筒 5筒 6筒 6条 6条 6条 8条 8条 8条 5万 6条 1筒 2条 8条] melds=[] flowers=[] guessed=false valid=false",
+        "07" to "hand=[4筒 5筒 6筒 7筒 8筒 6条 6条 8条 8条 8条 6条 8条 6条 1筒] melds=[碰:1筒] flowers=[] guessed=false valid=false",
+        "08" to "hand=[4筒 5筒 6筒 7筒 8筒 4条 4条 3筒 6条 5筒 1筒 2筒 8条] melds=[碰:1筒 碰:8条] flowers=[] guessed=false valid=false",
+        "09" to "hand=[4筒 4筒 5筒 5筒 6筒 7筒 8筒 1筒 2条 7条 2筒 8条] melds=[碰:1筒 碰:8条] flowers=[] guessed=false valid=false",
+        "10" to "hand=[4筒 4筒 4筒 4筒 5筒 5筒 5筒 6筒 7筒 8筒 7条 1条 1筒 2条 6条 2筒 8条] melds=[碰:1筒] flowers=[] guessed=false valid=false",
+        "11" to "hand=[3筒 4筒 4筒 4筒 6筒 7筒 8筒 1筒 2条 6条 4筒 8条] melds=[碰:1筒 碰:5筒] flowers=[] guessed=false valid=false",
+        "12" to "hand=[4万 5万 6万 7万 7万 8万 8万 4筒 4筒 4筒 6筒 7筒 8筒 1筒 9条 6条 4筒 7条 4筒 8条] melds=[] flowers=[] guessed=false valid=false",
     )
 
     @Test
@@ -137,6 +159,31 @@ class RealPhotoParityTest {
         for ((key, expected) in expectedGroup.toSortedMap()) {
             val g = groupTiles(boxes(dets.getValue(key)))
             assertEquals("照片 $key 的分组与 iOS 不一致", expected, fmtGroup(g))
+        }
+    }
+
+    /** 国标模式：收字牌/花牌 + 认吃。期望值同样来自 iOS TileGrouping.swift 的同一份输入。 */
+    private val expectedGroupMCR = mapOf(
+        "01" to "hand=[2万 2万 6万 7万 8万 8万 7条 7条 8条 8条 中] melds=[碰:4条] flowers=[] guessed=false valid=true",
+        "02" to "hand=[2万 2万 2万 4条 4条 6条 4筒 2条 9筒 8万 7万 8万 9万 7条 7条 8条 8条] melds=[] flowers=[秋] guessed=false valid=false",
+        "03" to "hand=[5万 7万 3万 2万 2万 3万 4条 4条 4条 8条 8条 8条 8条 7条] melds=[] flowers=[] guessed=false valid=true",
+        "04" to "hand=[4条 6条 7万 7万 6万] melds=[暗杠:7条 碰:3万 明杠:8条] flowers=[] guessed=true valid=true",
+        "05" to "hand=[2筒 4筒 5筒 6筒] melds=[明杠:1筒 碰:4条 明杠:8条] flowers=[] guessed=false valid=true",
+        "06" to "hand=[1筒 1筒 1筒 2筒 4筒 5筒 6筒 6条 6条 6条 8条 8条 8条 5万 6条 1筒 2条 8条] melds=[] flowers=[] guessed=false valid=false",
+        "07" to "hand=[4筒 5筒 6筒 7筒 8筒 6条 6条 8条 8条 8条 6条 8条 6条 1筒] melds=[碰:1筒] flowers=[] guessed=false valid=false",
+        "08" to "hand=[4筒 5筒 6筒 7筒 8筒 4条 4条 3筒 6条 5筒 1筒 2筒 8条] melds=[碰:1筒 碰:8条] flowers=[] guessed=false valid=false",
+        "09" to "hand=[4筒 4筒 5筒 5筒 6筒 7筒 8筒 1筒 2条 7条 2筒 8条] melds=[碰:1筒 碰:8条] flowers=[] guessed=false valid=false",
+        "10" to "hand=[1筒 2条 7条 1条 6条 2筒 8条] melds=[明杠:4筒 碰:5筒 吃:6筒 碰:1筒] flowers=[] guessed=false valid=false",
+        "11" to "hand=[3筒 4筒 4筒 4筒 6筒 7筒 8筒 1筒 2条 6条 4筒 8条] melds=[碰:1筒 碰:5筒] flowers=[] guessed=false valid=false",
+        "12" to "hand=[4万 5万 6万 7万 7万 8万 8万 4筒 4筒 4筒 6筒 7筒 8筒 1筒 9条 6条 4筒 7条 4筒 8条] melds=[] flowers=[] guessed=false valid=false",
+    )
+
+    @Test
+    fun mcrGroupingMatchesIos() {
+        val dets = loadDets()
+        for ((key, expected) in expectedGroupMCR.toSortedMap()) {
+            val g = groupTiles(boxes(dets.getValue(key), includeHonors = true), GameMode.MCR)
+            assertEquals("照片 $key 的国标分组与 iOS 不一致", expected, fmtGroup(g))
         }
     }
 }

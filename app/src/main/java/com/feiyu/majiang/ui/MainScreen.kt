@@ -33,8 +33,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.GridView
@@ -50,6 +52,8 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -79,11 +83,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -220,6 +226,8 @@ fun MainScreen(
     val settings = ruleStore.settings
     val gameMode = settings.gameMode
     val isMCR = gameMode.isMCR
+    // 无障碍标签在组合体外先取好：semantics 块里不能调 @Composable 的 tr()
+    val switchModeLabel = tr("切换玩法")
     val hasKongMeld = viewModel.melds.any { it.kind.isKong }
     val kongBloomAvailable = hasKongMeld && settings.kongBloomEnabled
 
@@ -335,10 +343,51 @@ fun MainScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        if (isMCR) tr("听牌计算器 · 国标") else tr("听牌计算器"),
-                        fontWeight = FontWeight.Bold,
-                    )
+                    // 标题本身就是切玩法的按钮——切玩法是常用操作，埋在设置页里太深。
+                    // 两种玩法都带后缀：只有一边有后缀的话，「没后缀」本身成了一种状态，
+                    // 用户看不出这是可切换的。
+                    var modeMenuOpen by remember { mutableStateOf(false) }
+                    Box {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { modeMenuOpen = true }
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .semantics { contentDescription = switchModeLabel },
+                        ) {
+                            Text(
+                                if (isMCR) tr("听牌计算器 · 国标") else tr("听牌计算器 · 川麻"),
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                Icons.Filled.ArrowDropDown,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = modeMenuOpen,
+                            onDismissRequest = { modeMenuOpen = false },
+                        ) {
+                            GameMode.entries.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = { Text(tr(mode.label)) },
+                                    onClick = {
+                                        modeMenuOpen = false
+                                        ruleStore.update { st -> st.copy(gameMode = mode) }
+                                    },
+                                    leadingIcon = {
+                                        if (mode == gameMode) {
+                                            Icon(Icons.Filled.Check, contentDescription = null)
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
                 },
                 navigationIcon = {
                     Row {

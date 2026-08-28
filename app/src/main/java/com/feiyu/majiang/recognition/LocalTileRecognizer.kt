@@ -18,6 +18,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
+import com.feiyu.majiang.core.GameMode
 import com.feiyu.majiang.core.GeoRect
 import com.feiyu.majiang.core.MahjongCard
 import com.feiyu.majiang.core.RecognitionResult
@@ -69,7 +70,11 @@ class LocalTileRecognizer(private val context: Context) {
         }
     }
 
-    fun recognize(bitmap: Bitmap): RecognitionResult {
+    /**
+     * @param mode 玩法。决定收不收风/箭/花（川麻不收，桌上混进一张「中」只会把张数搞乱），
+     *   以及分组时认不认吃（川麻无吃，认了会把手牌里的顺子当成副露）。
+     */
+    fun recognize(bitmap: Bitmap, mode: GameMode = GameMode.SICHUAN): RecognitionResult {
         loadSessionIfNeeded()
 
         // 第一遍：整图识别。低阈值的框只用来估计「牌所在区域」，达标（≥ 正式阈值）的作候选结果
@@ -97,14 +102,14 @@ class LocalTileRecognizer(private val context: Context) {
 
         // 只保留 万/筒/条（忽略风/箭等），转成牌盒后做空间聚类分组
         val boxes = finalDets.mapNotNull { d ->
-            cardFor(d.classId)?.let { c ->
+            cardFor(d.classId, includeHonors = mode.isMCR)?.let { c ->
                 TileBox(minX = d.x1, maxX = d.x2, cy = d.cy, height = d.h, card = c)
             }
         }
         if (boxes.isEmpty()) {
             throw LocalRecognitionException(tr("未能从图片中识别到麻将牌，请确保牌面清晰、正对镜头、光线充足。"))
         }
-        val result = groupTiles(boxes)
+        val result = groupTiles(boxes, mode)
         if (result.hand.isEmpty() && result.melds.isEmpty()) {
             throw LocalRecognitionException(tr("未能从图片中识别到麻将牌，请确保牌面清晰、正对镜头、光线充足。"))
         }
@@ -283,19 +288,51 @@ class LocalTileRecognizer(private val context: Context) {
         return if (union <= 0) 0f else inter / union
     }
 
-    // MARK: - 类别 → MahjongCard（仅 万/筒/条）
+    // MARK: - 类别 → MahjongCard
+    //
+    // 模型是 **42 类**：27 个数牌 + 7 个风/箭 + 8 个花/季。风箭在实拍里的置信度
+    // 是 0.89–0.94，和数牌一个水平，完全认得出来。
+    //
+    // includeHonors 决定收不收风/箭/花：
+    //   - 四川麻将没有字牌，桌上混进来一张「中」只会把张数搞乱 → 丢弃
+    //   - 国标要用 → 收下
 
-    private fun cardFor(classId: Int): MahjongCard? {
+    private fun cardFor(classId: Int, includeHonors: Boolean): MahjongCard? {
         if (classId < 0 || classId >= classNames.size) return null
-        val name = classNames[classId]          // 如 "5C"
+        val name = classNames[classId]          // 数牌如 "5C"，风箭如 "EW"
         if (name.length != 2) return null
+
+        // 风牌 EW/SW/WW/NW、箭牌 RD/GD/WD。rank 与 MahjongCard 的约定对齐：
+        // 风 1…4 = 东南西北，箭 1…3 = 中发白。
+        HONOR_RANKS[name]?.let { (suit, rank) ->
+            return if (includeHonors) MahjongCard(suit, rank) else null
+        }
+
         val rank = name[0].digitToIntOrNull() ?: return null
         if (rank !in 1..9) return null
         return when (name[1]) {
             'C' -> MahjongCard(MahjongCard.Suit.WAN, rank)   // Characters 万
             'D' -> MahjongCard(MahjongCard.Suit.TONG, rank)  // Dots 筒
             'B' -> MahjongCard(MahjongCard.Suit.TIAO, rank)  // Bamboo 条
-            else -> null                                      // F/S/风/箭：忽略
+            // 季牌 1S…4S = 春夏秋冬 → 花 1…4
+            'S' -> if (includeHonors) MahjongCard(MahjongCard.Suit.HUA, rank) else null
+            // 花牌 1F…4F 牌面印的是「梅1 兰2 菊3 竹4」，而 MahjongCard 的花 rank 排的是
+            // 「春夏秋冬梅兰竹菊」——竹在 7、菊在 8，所以 3F→8、4F→7，不是顺着排的。
+            'F' -> if (includeHonors) MahjongCard(MahjongCard.Suit.HUA, FLOWER_RANKS[rank - 1]) else null
+            else -> null
         }
+    }
+
+    private companion object {
+        /** 风/箭类别名 → (花色, rank) */
+        val HONOR_RANKS = mapOf(
+            "EW" to (MahjongCard.Suit.FENG to 1), "SW" to (MahjongCard.Suit.FENG to 2),
+            "WW" to (MahjongCard.Suit.FENG to 3), "NW" to (MahjongCard.Suit.FENG to 4),
+            "RD" to (MahjongCard.Suit.JIAN to 1), "GD" to (MahjongCard.Suit.JIAN to 2),
+            "WD" to (MahjongCard.Suit.JIAN to 3),
+        )
+
+        /** 1F…4F（梅兰菊竹）→ MahjongCard 的花 rank */
+        val FLOWER_RANKS = intArrayOf(5, 6, 8, 7)
     }
 }

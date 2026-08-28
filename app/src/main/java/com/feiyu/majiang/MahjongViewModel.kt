@@ -320,16 +320,32 @@ class MahjongViewModel : ViewModel() {
      * （限剩余名额、且每张牌手牌+副露合计 ≤ 4）。返回是否发生截断。
      */
     fun applyRecognition(result: RecognitionResult): Boolean {
-        // 国标模式下保留用户已经手动补进去的花牌（模型认不出花牌）
-        val keptFlowers = if (gameMode.isMCR) flowerTiles else emptyList()
+        // 国标模式：花牌用识别到的那些。识别不到花时（照片里本来就没有，或没框进去）
+        // 退回用户已经手动补的，免得一次识别把他刚点好的花清空。
+        val keptFlowers = if (gameMode.isMCR) {
+            result.flowers.ifEmpty { flowerTiles }
+        } else emptyList()
         melds.clear()
         melds.addAll(result.melds.take(maxMelds))
-        val freq = meldsToFrequency27(melds)
+
+        // 「同一张牌最多 4 张」的计数下标要按玩法选：tileIndex 只覆盖万/筒/条（0…26），
+        // 字牌在它那里是 -1——直接用会把识别到的风/箭**整批静默丢掉**。
+        // 国标要用 mcrIndex（0…33，含东南西北中发白）。花牌不参与，两边都是 -1。
+        val tileSlot: (MahjongCard) -> Int =
+            if (gameMode.isMCR) { c -> c.mcrIndex } else { c -> c.tileIndex }
+        val freq = IntArray(34)
+        for (m in melds) {
+            for (t in m.tiles) {
+                val i = tileSlot(t)
+                if (i >= 0) freq[i] += 1
+            }
+        }
+
         val cap = maxConcealed
         val kept = mutableListOf<MahjongCard>()
         for (card in sortedCards(result.hand)) {
             if (kept.size >= cap) break
-            val i = card.tileIndex
+            val i = tileSlot(card)
             if (i < 0 || freq[i] >= 4) continue
             freq[i] += 1
             kept.add(card)
@@ -354,13 +370,14 @@ class MahjongViewModel : ViewModel() {
             try {
                 val result = withContext(Dispatchers.Default) {
                     val r = recognizer ?: createRecognizer().also { recognizer = it }
-                    r.recognize(bitmap)
+                    r.recognize(bitmap, gameMode)
                 }
                 val truncated = applyRecognition(result)   // 内部会 clearResult()
 
-                // 国标模式：模型只认 万/筒/条 27 类，风/箭/花永远认不出来，只能手动补。
+                // 国标模式的已知短板：吃和手牌里的顺子牌面完全一样，只能靠「摆得分开」区分，
+                // 摆得紧就会判错边；平摊在桌面上的散牌还容易南/北互认。
                 val mcrNotice = if (gameMode.isMCR) {
-                    tr("国标模式：拍照只能识别万/筒/条，风牌、箭牌、花牌认不出来，请在键盘上手动补入。")
+                    tr("国标模式：吃靠「摆得分开」认，和手牌里的顺子容易判错边；平摊的风牌也容易认错，请核对后再算。")
                 } else null
 
                 // 张数不变量：手牌 + 3×副露 必须是 13 或 14。对不上说明混进了桌上其他人的牌、
