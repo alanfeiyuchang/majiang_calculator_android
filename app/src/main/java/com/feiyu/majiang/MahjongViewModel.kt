@@ -268,6 +268,16 @@ class MahjongViewModel : ViewModel() {
                 }
                 val truncated = applyRecognition(result)   // 内部会 clearResult()
 
+                // 张数不变量：手牌 + 3×副露 必须是 13 或 14。对不上说明混进了桌上其他人的牌、
+                // 或者有漏识别——这种情况下算出来的番数一定是错的，所以回填让用户改，但不自动分析。
+                if (!result.hasValidTileCount) {
+                    hintMessage = tr(
+                        "识别到 %lld 张牌（应为 13 或 14），可能混入了桌上其他人的牌，或有漏识别。已回填识别结果，请核对后再分析。",
+                        result.effectiveTileCount
+                    )
+                    return@launch
+                }
+
                 if (canAnalyze) {
                     completeCalculation()   // 内部先 clearResult() 再算；花猪/空手牌等仍会设 hintMessage 阻断
                     if (hintMessage == null) {

@@ -68,8 +68,9 @@ class GroupingTest {
             r.melds.size == 1 && meldDesc(r.melds[0]) == "明杠九筒" && !r.guessedConcealedKong)
     }
 
+    // 手牌 10 张 + 暗杠 3 张名额 = 13，张数成立，「猜暗杠」才会被采纳——这正是现在判定暗杠的依据
     @Test fun g4_handPlusConcealedKong() {
-        var (boxes, x) = lay(cards(listOf("1m", "2m", "3m", "4m", "5m", "6m", "7m", "2p")), 0f)
+        var (boxes, x) = lay(cards(listOf("1m", "2m", "3m", "4m", "5m", "6m", "7m", "2p", "3p", "4p")), 0f)
         x += 8 * tileW
         val kong = lay(cards(listOf("3p")), x)           // 只露的那张明牌
         boxes = boxes + kong.first
@@ -162,6 +163,105 @@ class GroupingTest {
             r.melds.size == 2 && r.guessedConcealedKong
                 && r.melds.any { meldDesc(it) == "碰七条" }
                 && r.melds.any { meldDesc(it) == "暗杠二万" })
+    }
+
+    // —— 整桌入镜 / 张数校验（对应 iOS G12–G16）——
+
+    /** 契约：桌上的牌不会被静默丢弃（丢弃同样会吃掉平摊的碰/杠），而是并回手牌让张数对不上被拦下 */
+    @Test fun g12_wholeTableInFrame() {
+        val hand = lay(cards(listOf("1m","2m","3m","4m","5m","6m","7m","8m","9m","1p","2p","3p","5p")), 0f, cy = 200f).first
+        val table = mutableListOf<TileBox>()
+        var tx = 0f
+        for (i in 0 until 16) {
+            table.add(TileBox(tx, tx + tileW / 2, cy = 20f + (i / 8) * 10f, height = tileH / 2, card = c("7p")))
+            tx += tileW / 2 + 1
+            if (i == 7) tx = 0f
+        }
+        val r = groupTiles(hand + table)
+        assertTrue("G12 手牌簇选对且张数对不上 hand=${r.hand.size} valid=${r.hasValidTileCount}",
+            r.hand.take(13) == cards(listOf("1m","2m","3m","4m","5m","6m","7m","8m","9m","1p","2p","3p","5p"))
+                && !r.hasValidTileCount)
+    }
+
+    @Test fun g13_farTilesOutnumberHand() {
+        val hand = lay(cards(listOf("1m","2m","3m","4m","5m","6m","7m","8m","9m","1p")), 0f, cy = 200f).first
+        val table = mutableListOf<TileBox>()
+        var tx = 0f
+        repeat(30) {
+            table.add(TileBox(tx, tx + tileW / 2, cy = 20f, height = tileH / 2, card = c("9s")))
+            tx += tileW / 2 + 1
+        }
+        val r = groupTiles(hand + table)
+        assertTrue("G13 远处 30 张多过手牌 10 张，手牌簇仍选对 hand=${r.hand.size}",
+            r.hand.take(10) == cards(listOf("1m","2m","3m","4m","5m","6m","7m","8m","9m","1p"))
+                && !r.hasValidTileCount)
+    }
+
+    /** 手牌摆成两排（大小相当、不同排）→ 合并成一副手牌 */
+    @Test fun g14b_twoRowHandMerges() {
+        val front = lay(cards(listOf("3m","5m","8m","8m","5p","6p","7p")), 0f, cy = 200f).first
+        val back = mutableListOf<TileBox>()
+        var bx = 0f
+        for (card in cards(listOf("2s","3s","4s","5s","6s","7s"))) {
+            back.add(TileBox(bx, bx + tileW * 0.88f, cy = 140f, height = tileH * 0.88f, card = card))
+            bx += tileW * 0.88f + 1
+        }
+        val r = groupTiles(front + back)
+        assertTrue("G14b 两排手牌合并成 13 张 hand=${r.hand.size}",
+            r.hand.size == 13 && r.melds.isEmpty() && r.hasValidTileCount)
+    }
+
+    /** 平摊在桌上的碰被透视压扁（高度只有手牌的一半）→ 必须仍识别成碰。
+     *  核心回归测试：任何「按大小丢框」的过滤都会先吃掉这一组。 */
+    @Test fun g14c_flatPongStillRecognized() {
+        val hand = lay(cards(listOf("1m","2m","3m","4m","5m","6m","7m","8m","9m","2p")), 0f, cy = 200f).first
+        val pong = mutableListOf<TileBox>()
+        var px = 20 * tileW
+        for (card in cards(listOf("5p","5p","5p"))) {
+            pong.add(TileBox(px, px + tileW, cy = 120f, height = tileH * 0.5f, card = card))
+            px += tileW + 1
+        }
+        val r = groupTiles(hand + pong)
+        assertTrue("G14c 压扁一半的平摊碰仍识别为碰 melds=${r.melds.map(::meldDesc)}",
+            r.hand.size == 10 && r.melds.size == 1 && meldDesc(r.melds[0]) == "碰五筒" && r.hasValidTileCount)
+    }
+
+    @Test fun g15_tileCountInvariant() {
+        var (boxes, x) = lay(cards(listOf("1m","2m","3m","4m","5m","6m","7m","8m","9m","2p")), 0f)
+        x += 8 * tileW
+        boxes = boxes + lay(cards(listOf("5p","5p","5p")), x).first
+        val r = groupTiles(boxes)
+        assertTrue("G15 手牌10+碰1组=13 张合法 effective=${r.effectiveTileCount}",
+            r.effectiveTileCount == 13 && r.hasValidTileCount)
+
+        val short = lay(cards(listOf("1m","2m","3m","4m","5m")), 0f).first
+        assertTrue("G15b 只识别到 5 张 → 张数不合法", !groupTiles(short).hasValidTileCount)
+    }
+
+    @Test fun g16_ownTilesOnlyKeepsAll() {
+        val boxes = lay(cards(listOf("1m","2m","3m","4m","5m","6m","7m","8m","9m","1p","2p","3p","5p")), 0f).first
+        val r = groupTiles(boxes)
+        assertTrue("G16 只拍自己的牌一张不少 hand=${r.hand.size}",
+            r.hand.size == 13 && r.melds.isEmpty() && r.hasValidTileCount)
+    }
+
+    // —— 自动框选区域 myTilesRegion ——
+
+    /** 近处的牌（框高 1.0）+ 远处的弃牌（框高 0.4）→ 只框住近处那批 */
+    @Test fun m1_regionExcludesFarTiles() {
+        val near = (0 until 13).map { GeoRect(10f + it * 30f, 600f, 26f, 36f) }
+        val far = (0 until 30).map { GeoRect(5f + it * 14f, 200f, 11f, 15f) }
+        val r = myTilesRegion(near + far, 1000f, 1000f)
+        assertTrue("M1 应框住近景 r=$r", r != null && r!!.y > 400f && r.maxY < 1000f)
+        assertTrue("M1 不应把远处弃牌框进来", r!!.y > 300f)
+    }
+
+    /** 只有自己的牌时不该滤掉任何一张，框要盖住全部 */
+    @Test fun m2_regionCoversAllWhenUniform() {
+        val boxes = (0 until 13).map { GeoRect(10f + it * 30f, 600f, 26f, 36f) }
+        val r = myTilesRegion(boxes, 1000f, 1000f)
+        assertTrue("M2 框应盖住所有牌 r=$r",
+            r != null && boxes.all { r!!.contains(it) })
     }
 
     // —— 二次放大区域 zoomRegion（对应 iOS Z1–Z4）——

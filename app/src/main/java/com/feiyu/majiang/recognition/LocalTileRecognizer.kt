@@ -23,6 +23,7 @@ import com.feiyu.majiang.core.MahjongCard
 import com.feiyu.majiang.core.RecognitionResult
 import com.feiyu.majiang.core.TileBox
 import com.feiyu.majiang.core.groupTiles
+import com.feiyu.majiang.core.myTilesRegion
 import com.feiyu.majiang.core.zoomRegion
 import com.feiyu.majiang.tr
 import java.nio.FloatBuffer
@@ -75,17 +76,11 @@ class LocalTileRecognizer(private val context: Context) {
         val first = detect(bitmap, regionThreshold)
         var finalDets = first.dets.filter { it.score >= confidenceThreshold }
 
-        // 第二遍：牌只占画面一小部分时（整图缩到 640 后每张牌太小），
-        // 把牌区裁出来放大重新识别，用更清晰的结果替换
-        val boxesInImage = first.dets.map { d ->
-            GeoRect(
-                x = (d.x1 - first.dw) / first.scale,
-                y = (d.y1 - first.dh) / first.scale,
-                width = (d.x2 - d.x1) / first.scale,
-                height = (d.y2 - d.y1) / first.scale,
-            )
-        }
-        val region = zoomRegion(boxesInImage, bitmap.width.toFloat(), bitmap.height.toFloat())
+        // 第二遍：牌只占画面一小部分时（整图缩到 640 后每张牌太小），把牌区裁出来放大重识别。
+        // 区域取「所有达标检测框」的并集，保证放大时不会裁掉任何一张已经认出来的牌——
+        // 识别链路上不做任何按大小的丢弃，那会静默吃掉平摊在桌上的碰/杠。
+        val confidentRects = finalDets.map { d -> toImageRect(d, first) }
+        val region = zoomRegion(confidentRects, bitmap.width.toFloat(), bitmap.height.toFloat())
         if (region != null) {
             val x = region.x.toInt().coerceIn(0, bitmap.width - 1)
             val y = region.y.toInt().coerceIn(0, bitmap.height - 1)
@@ -114,6 +109,35 @@ class LocalTileRecognizer(private val context: Context) {
             throw LocalRecognitionException(tr("未能从图片中识别到麻将牌，请确保牌面清晰、正对镜头、光线充足。"))
         }
         return result
+    }
+
+    /** 检测框（640 letterbox 空间）→ 原图像素矩形 */
+    private fun toImageRect(d: Detection, pass: DetectPass): GeoRect = GeoRect(
+        x = (d.x1 - pass.dw) / pass.scale,
+        y = (d.y1 - pass.dh) / pass.scale,
+        width = (d.x2 - d.x1) / pass.scale,
+        height = (d.y2 - d.y1) / pass.scale,
+    )
+
+    /**
+     * 只跑第一遍粗检，返回「自己的牌」所在区域的**相对位置**（0…1，左上原点），
+     * 供裁剪页在用户进入时自动画好选框。返回相对坐标是为了不受旋转/显示缩放影响。
+     * 找不到、或区域已铺满整张画面（没把握单独框出来）时返回 null，
+     * 此时裁剪页退回手动引导、识别整张照片，绝不画一个假装很准的框。
+     */
+    fun suggestHandRegion(bitmap: Bitmap): GeoRect? {
+        loadSessionIfNeeded()
+        val w = bitmap.width.toFloat()
+        val h = bitmap.height.toFloat()
+        if (w <= 0f || h <= 0f) return null
+
+        val pass = detect(bitmap, regionThreshold)
+        if (pass.dets.isEmpty()) return null
+        val rects = pass.dets.map { toImageRect(it, pass) }
+
+        val region = myTilesRegion(rects, w, h) ?: return null
+        if (region.width > w * 0.85f && region.height > h * 0.85f) return null
+        return GeoRect(region.x / w, region.y / h, region.width / w, region.height / h)
     }
 
     /**

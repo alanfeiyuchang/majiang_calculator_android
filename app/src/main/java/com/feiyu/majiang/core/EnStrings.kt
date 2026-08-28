@@ -7,6 +7,9 @@
 package com.feiyu.majiang.core
 
 val EN_STRINGS: Map<String, String> = mapOf(
+    "正在自动框选你的牌…" to "Framing your tiles…",
+    "已自动框出你的牌，框不准可拖四角或四边调整" to "Your tiles are framed — drag a corner or an edge if it's off",
+    "识别到 %lld 张牌（应为 13 或 14），可能混入了桌上其他人的牌，或有漏识别。已回填识别结果，请核对后再分析。" to "Recognized %lld tiles (13 or 14 expected). Other players' tiles may have slipped in, or some were missed. The result has been filled in — check it, then analyze.",
     "%lld / 4 组" to "%lld / 4 sets",
     "%lld 番" to "%lld fan",
     "%lld 番·封顶 %lld" to "%lld fan · cap %lld",

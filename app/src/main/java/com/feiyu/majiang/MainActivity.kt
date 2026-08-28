@@ -28,6 +28,8 @@ import com.feiyu.majiang.recognition.CameraScreen
 import com.feiyu.majiang.recognition.CropScreen
 import com.feiyu.majiang.recognition.ImageSource
 import com.feiyu.majiang.recognition.LocalTileRecognizer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.feiyu.majiang.ui.MainScreen
 import com.feiyu.majiang.ui.MajiangTheme
 import com.feiyu.majiang.ui.SettingsScreen
@@ -103,6 +105,13 @@ private fun AppRoot() {
         crop != null -> CropScreen(
             image = crop.bitmap,
             source = crop.source,
+            suggestRegion = { bmp ->
+                // 自动框选：跑一遍粗检定位「自己的牌」。失败返回 null，裁剪页退回手动引导。
+                withContext(Dispatchers.Default) {
+                    runCatching { LocalTileRecognizer(context.applicationContext).suggestHandRegion(bmp) }
+                        .getOrNull()
+                }
+            },
             onCancel = { pendingCrop = null },
             onRetake = {
                 val source = crop.source
