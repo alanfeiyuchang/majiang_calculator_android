@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.feiyu.majiang.core.DiscardSuggestion
+import com.feiyu.majiang.core.GameMode
 import com.feiyu.majiang.core.MahjongCard
 import com.feiyu.majiang.core.Meld
 import com.feiyu.majiang.core.RecognitionResult
@@ -21,6 +22,11 @@ import com.feiyu.majiang.core.calculateWaiting
 import com.feiyu.majiang.core.discardSuggestions
 import com.feiyu.majiang.core.handShanten
 import com.feiyu.majiang.core.handToFrequency27
+import com.feiyu.majiang.core.mcrAcceptanceTiles
+import com.feiyu.majiang.core.mcrCalculateWaiting
+import com.feiyu.majiang.core.mcrCardComparator
+import com.feiyu.majiang.core.mcrDiscardSuggestions
+import com.feiyu.majiang.core.mcrHandShanten
 import com.feiyu.majiang.core.meldsToFrequency27
 import com.feiyu.majiang.core.suitCount
 import com.feiyu.majiang.recognition.LocalRecognitionException
@@ -38,9 +44,25 @@ class MahjongViewModel : ViewModel() {
     /** 一张进张牌及其剩余张数 */
     data class AcceptanceTile(val card: MahjongCard, val remaining: Int)
 
+    /** 当前玩法（由界面从 RuleSettingsStore 同步进来） */
+    var gameMode by mutableStateOf(GameMode.SICHUAN)
+        private set
+
+    /**
+     * 切玩法时清空：四川的牌在国标下含义没变，但副露种类/牌张集合变了，
+     * 留着上一局的牌容易算出对不上的结果。
+     */
+    fun switchGameMode(mode: GameMode) {
+        if (mode == gameMode) return
+        gameMode = mode
+        selectedTiles.clear()
+        melds.clear()
+        clearResult()
+    }
+
     val selectedTiles = mutableStateListOf<SelectedTile>()
 
-    /** 桌上的牌（碰 / 明杠 / 暗杠） */
+    /** 桌上的牌（吃 / 碰 / 明杠 / 暗杠） */
     val melds = mutableStateListOf<Meld>()
 
     var waitingTiles by mutableStateOf<List<MahjongCard>>(emptyList())
@@ -78,25 +100,43 @@ class MahjongViewModel : ViewModel() {
 
     private val maxMelds = 4
 
+    /** 参与和牌的手牌（国标里花牌不参与，单独计分） */
+    val handTiles: List<MahjongCard>
+        get() = selectedTiles.map { it.card }.filter { !it.suit.isFlower }
+
+    /** 花牌（仅国标） */
+    val flowerTiles: List<MahjongCard>
+        get() = selectedTiles.map { it.card }.filter { it.suit.isFlower }
+
     /** 每组副露占掉 3 张的名额，手牌（暗牌）上限随之减少 */
     val maxConcealed: Int get() = 14 - 3 * melds.size
 
-    val canAddMore: Boolean get() = selectedTiles.size < maxConcealed
+    val canAddMore: Boolean get() = handTiles.size < maxConcealed
 
-    /** 是否可分析：暗牌非空且为 3n+1 或 3n+2 张 */
+    /** 是否可分析：暗牌非空且为 3n+1 或 3n+2 张（花牌不算） */
     val canAnalyze: Boolean
         get() {
-            val c = selectedTiles.size
+            val c = handTiles.size
             return c > 0 && c % 3 != 0
         }
 
-    /** 某张牌在手牌 + 副露里合计已用张数 */
+    /** 某张牌在手牌 + 副露里合计已用张数。花牌每种只有一张。 */
     fun usedCount(card: MahjongCard): Int =
         selectedTiles.count { it.card == card } +
-            melds.sumOf { if (it.card == card) it.tileCount else 0 }
+            melds.sumOf { m -> m.tiles.count { it == card } }
 
     fun addCard(card: MahjongCard) {
-        if (selectedTiles.size >= maxConcealed) return
+        if (card.suit.isFlower) {
+            if (!gameMode.isMCR) return
+            if (usedCount(card) >= 1) {
+                hintMessage = tr("「%@」只有一张。", card.displayText)
+                return
+            }
+            selectedTiles.add(SelectedTile(card))
+            clearResult()
+            return
+        }
+        if (handTiles.size >= maxConcealed) return
         if (usedCount(card) >= 4) {
             hintMessage = tr("「%@」在手牌和副露里已用满 4 张。", card.displayText)
             return
@@ -113,22 +153,32 @@ class MahjongViewModel : ViewModel() {
     // MARK: 副露
 
     /** 能否加一组该牌的副露（用于键盘禁用态） */
-    fun canAddMeld(kind: Meld.Kind, card: MahjongCard): Boolean =
-        melds.size < maxMelds &&
-            selectedTiles.size <= 14 - 3 * (melds.size + 1) &&
-            usedCount(card) + kind.tileCount <= 4
+    fun canAddMeld(kind: Meld.Kind, card: MahjongCard): Boolean {
+        if (kind !in gameMode.meldKinds) return false
+        if (melds.size >= maxMelds || handTiles.size > 14 - 3 * (melds.size + 1)) return false
+        if (kind.isChow) {
+            // 吃：只能是数牌 1–7 起头，且三张各自都还有剩
+            if (!card.suit.isNumbered || card.rank > 7) return false
+            return Meld(kind, card).tiles.all { usedCount(it) < 4 }
+        }
+        return usedCount(card) + kind.tileCount <= 4
+    }
 
     fun addMeld(kind: Meld.Kind, card: MahjongCard) {
         if (melds.size >= maxMelds) {
             hintMessage = tr("最多 4 组副露。")
             return
         }
-        if (selectedTiles.size > 14 - 3 * (melds.size + 1)) {
+        if (handTiles.size > 14 - 3 * (melds.size + 1)) {
             hintMessage = tr("手牌太多，放不下这组副露——先删几张手牌（碰/杠会占掉 3 张名额）。")
             return
         }
-        if (usedCount(card) + kind.tileCount > 4) {
-            hintMessage = tr("「%@」总数会超过 4 张，无法%@。", card.displayText, tr(kind.raw))
+        if (!canAddMeld(kind, card)) {
+            hintMessage = if (kind.isChow) {
+                tr("吃只能用数牌，且要从 1–7 起头凑连续三张。")
+            } else {
+                tr("「%@」总数会超过 4 张，无法%@。", card.displayText, tr(kind.raw))
+            }
             return
         }
         melds.add(Meld(kind, card))
@@ -147,12 +197,10 @@ class MahjongViewModel : ViewModel() {
         clearResult()
     }
 
-    /** 按 万 → 条 → 筒，同花色按点数 1–9 排序 */
+    /** 万 → 条 → 筒 →（国标）风 → 箭 → 花，同门按点数排序 */
     fun sortSelected() {
         if (selectedTiles.size <= 1) return
-        val sorted = selectedTiles.sortedWith(
-            compareBy({ it.card.suit.displaySortIndex }, { it.card.rank })
-        )
+        val sorted = selectedTiles.sortedWith(compareBy(mcrCardComparator) { it.card })
         selectedTiles.clear()
         selectedTiles.addAll(sorted)
         clearResult()
@@ -170,7 +218,13 @@ class MahjongViewModel : ViewModel() {
             hintMessage = tr("请先选择手牌。")
             return
         }
-        val cards = selectedTiles.map { it.card }
+        if (gameMode.isMCR) calculateMCR() else calculateSichuan()
+    }
+
+    // MARK: 四川（血战到底）
+
+    private fun calculateSichuan() {
+        val cards = handTiles
 
         // 缺一门：手牌 + 副露已含三门花色（花猪），无论如何都不能胡
         val combined = handToFrequency27(cards)
@@ -204,21 +258,54 @@ class MahjongViewModel : ViewModel() {
                     discards = discardSuggestions(cards, melds)
                 }
             }
-            else -> {
-                // 3n：张数不构成可分析手牌
-                val m = melds.size
-                val listenCounts = (0..(4 - m)).joinToString("/") { "${3 * it + 1}" }
-                hintMessage = tr(
-                    "当前副露 %lld 组，手牌需为 %@ 张（听牌）或再多 1 张（打牌建议）。当前手牌 %lld 张。",
-                    m, listenCounts, cards.size
-                )
-            }
+            else -> hintMessage = countHintMessage(cards.size)
         }
     }
 
-    /** 万 → 条 → 筒，同花色按点数排序 */
+    // MARK: 国标（MCR）
+
+    private fun calculateMCR() {
+        val cards = handTiles
+        if (cards.isEmpty()) {
+            hintMessage = tr("只有花牌——请再选入参与和牌的牌。")
+            return
+        }
+        when (cards.size % 3) {
+            1 -> {
+                val sh = mcrHandShanten(cards, melds)
+                shantenValue = sh
+                hasAnalyzed = true
+                if (sh == 0) {
+                    waitingTiles = mcrCalculateWaiting(cards, melds)
+                    isDeadWait = waitingTiles.isEmpty()
+                } else {
+                    acceptance = mcrAcceptanceTiles(cards, melds)
+                        .map { AcceptanceTile(it.card, it.remaining) }
+                }
+            }
+            2 -> {
+                val sh = mcrHandShanten(cards, melds)
+                shantenValue = sh
+                hasAnalyzed = true
+                if (sh != -1) discards = mcrDiscardSuggestions(cards, melds)
+            }
+            else -> hintMessage = countHintMessage(cards.size)
+        }
+    }
+
+    /** 3n 张（张数不构成可分析手牌）时的提示 */
+    private fun countHintMessage(count: Int): String {
+        val m = melds.size
+        val listenCounts = (0..(4 - m)).joinToString("/") { "${3 * it + 1}" }
+        return tr(
+            "当前副露 %lld 组，手牌需为 %@ 张（听牌）或再多 1 张（打牌建议）。当前手牌 %lld 张。",
+            m, listenCounts, count
+        )
+    }
+
+    /** 万 → 条 → 筒 →（国标）风 → 箭 → 花，同门按点数排序 */
     private fun sortedCards(cards: List<MahjongCard>): List<MahjongCard> =
-        cards.sortedWith(compareBy({ it.suit.displaySortIndex }, { it.rank }))
+        cards.sortedWith(mcrCardComparator)
 
     /** 直接用一组牌替换当前手牌（用于 AI 识别结果回填），超过上限时截断 */
     fun setHand(cards: List<MahjongCard>) {
@@ -233,6 +320,8 @@ class MahjongViewModel : ViewModel() {
      * （限剩余名额、且每张牌手牌+副露合计 ≤ 4）。返回是否发生截断。
      */
     fun applyRecognition(result: RecognitionResult): Boolean {
+        // 国标模式下保留用户已经手动补进去的花牌（模型认不出花牌）
+        val keptFlowers = if (gameMode.isMCR) flowerTiles else emptyList()
         melds.clear()
         melds.addAll(result.melds.take(maxMelds))
         val freq = meldsToFrequency27(melds)
@@ -240,12 +329,13 @@ class MahjongViewModel : ViewModel() {
         val kept = mutableListOf<MahjongCard>()
         for (card in sortedCards(result.hand)) {
             if (kept.size >= cap) break
-            if (freq[card.tileIndex] >= 4) continue
-            freq[card.tileIndex] += 1
+            val i = card.tileIndex
+            if (i < 0 || freq[i] >= 4) continue
+            freq[i] += 1
             kept.add(card)
         }
         selectedTiles.clear()
-        selectedTiles.addAll(kept.map { SelectedTile(it) })
+        selectedTiles.addAll((kept + keptFlowers).map { SelectedTile(it) })
         clearResult()
         return kept.size < result.hand.size || result.melds.size > maxMelds
     }
@@ -268,31 +358,47 @@ class MahjongViewModel : ViewModel() {
                 }
                 val truncated = applyRecognition(result)   // 内部会 clearResult()
 
+                // 国标模式：模型只认 万/筒/条 27 类，风/箭/花永远认不出来，只能手动补。
+                val mcrNotice = if (gameMode.isMCR) {
+                    tr("国标模式：拍照只能识别万/筒/条，风牌、箭牌、花牌认不出来，请在键盘上手动补入。")
+                } else null
+
                 // 张数不变量：手牌 + 3×副露 必须是 13 或 14。对不上说明混进了桌上其他人的牌、
                 // 或者有漏识别——这种情况下算出来的番数一定是错的，所以回填让用户改，但不自动分析。
                 if (!result.hasValidTileCount) {
-                    hintMessage = tr(
-                        "识别到 %lld 张牌（应为 13 或 14），可能混入了桌上其他人的牌，或有漏识别。已回填识别结果，请核对后再分析。",
-                        result.effectiveTileCount
-                    )
+                    hintMessage = if (mcrNotice != null) {
+                        tr("识别到 %lld 张牌（应为 13 或 14）。", result.effectiveTileCount) + mcrNotice
+                    } else {
+                        tr(
+                            "识别到 %lld 张牌（应为 13 或 14），可能混入了桌上其他人的牌，或有漏识别。已回填识别结果，请核对后再分析。",
+                            result.effectiveTileCount
+                        )
+                    }
                     return@launch
                 }
 
                 if (canAnalyze) {
                     completeCalculation()   // 内部先 clearResult() 再算；花猪/空手牌等仍会设 hintMessage 阻断
                     if (hintMessage == null) {
-                        recognitionNotice = when {
-                            result.guessedConcealedKong -> tr(
-                                "已自动分组：%lld 副露（含暗杠——只露一张、靠猜，建议核对「桌上的牌」）。",
-                                melds.size
+                        val notes = mutableListOf<String>()
+                        if (mcrNotice != null) notes.add(mcrNotice)
+                        when {
+                            result.guessedConcealedKong -> notes.add(
+                                tr(
+                                    "已自动分组：%lld 副露（含暗杠——只露一张、靠猜，建议核对「桌上的牌」）。",
+                                    melds.size
+                                )
                             )
-                            melds.isNotEmpty() -> tr("已自动分组：%lld 副露，建议核对「桌上的牌」。", melds.size)
-                            truncated -> tr("识别到超过 %lld 张牌，已保留前 %lld 张。", maxConcealed, maxConcealed)
-                            else -> null
+                            melds.isNotEmpty() ->
+                                notes.add(tr("已自动分组：%lld 副露，建议核对「桌上的牌」。", melds.size))
+                            truncated ->
+                                notes.add(tr("识别到超过 %lld 张牌，已保留前 %lld 张。", maxConcealed, maxConcealed))
                         }
+                        if (notes.isNotEmpty()) recognitionNotice = notes.joinToString(" ")
                     }
                 } else {
-                    hintMessage = tr("已识别 %lld 张，张数不构成可分析手牌，请核对后再分析。", selectedTiles.size)
+                    hintMessage = tr("已识别 %lld 张，张数不构成可分析手牌，请核对后再分析。", selectedTiles.size) +
+                        (mcrNotice ?: "")
                 }
             } catch (e: LocalRecognitionException) {
                 selectedTiles.clear()
