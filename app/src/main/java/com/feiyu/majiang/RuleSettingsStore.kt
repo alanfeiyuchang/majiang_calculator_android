@@ -11,6 +11,7 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.feiyu.majiang.core.GameMode
 import com.feiyu.majiang.core.GenMode
 import com.feiyu.majiang.core.RuleSettings
 import org.json.JSONObject
@@ -55,6 +56,19 @@ class RuleSettingsStore(context: Context) {
                     if (o.optBoolean("kongCountsAsGen")) GenMode.FAN else GenMode.OFF  // 旧「杠计根番」布尔迁移
                 } else GenMode.FAN
             return RuleSettings(
+                gameMode = GameMode.fromRaw(o.optString("gameMode", "")) ?: d.gameMode,
+                mcrPrevalentWind = o.optInt("mcrPrevalentWind", d.mcrPrevalentWind),
+                mcrSeatWind = o.optInt("mcrSeatWind", d.mcrSeatWind),
+                mcrZiYiSeCountsHunYaoJiu =
+                    o.optBoolean("mcrZiYiSeCountsHunYaoJiu", d.mcrZiYiSeCountsHunYaoJiu),
+                mcrJiuLianCountsShuangAnKe =
+                    o.optBoolean("mcrJiuLianCountsShuangAnKe", d.mcrJiuLianCountsShuangAnKe),
+                mcrSevenPairsAllowsQuadAsTwoPairs =
+                    o.optBoolean("mcrSevenPairsAllowsQuadAsTwoPairs", d.mcrSevenPairsAllowsQuadAsTwoPairs),
+                mcrPerKongFanWithThreeKongs =
+                    o.optBoolean("mcrPerKongFanWithThreeKongs", d.mcrPerKongFanWithThreeKongs),
+                mcrWaitFanHighestReading =
+                    o.optBoolean("mcrWaitFanHighestReading", d.mcrWaitFanHighestReading),
                 baseStake = if (o.has("baseStake")) o.optDouble("baseStake", d.baseStake) else d.baseStake,
                 fanCap = o.optInt("fanCap", d.fanCap),
                 selfDrawAddsFan = o.optBoolean("selfDrawAddsFan", d.selfDrawAddsFan),
@@ -74,6 +88,14 @@ class RuleSettingsStore(context: Context) {
         }
 
         fun encode(s: RuleSettings): JSONObject = JSONObject().apply {
+            put("gameMode", s.gameMode.raw)
+            put("mcrPrevalentWind", s.mcrPrevalentWind)
+            put("mcrSeatWind", s.mcrSeatWind)
+            put("mcrZiYiSeCountsHunYaoJiu", s.mcrZiYiSeCountsHunYaoJiu)
+            put("mcrJiuLianCountsShuangAnKe", s.mcrJiuLianCountsShuangAnKe)
+            put("mcrSevenPairsAllowsQuadAsTwoPairs", s.mcrSevenPairsAllowsQuadAsTwoPairs)
+            put("mcrPerKongFanWithThreeKongs", s.mcrPerKongFanWithThreeKongs)
+            put("mcrWaitFanHighestReading", s.mcrWaitFanHighestReading)
             put("baseStake", s.baseStake)
             put("fanCap", s.fanCap)
             put("selfDrawAddsFan", s.selfDrawAddsFan)

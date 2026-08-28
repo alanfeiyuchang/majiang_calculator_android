@@ -35,6 +35,27 @@ enum class GenMode(val raw: String) {
 
 /** 可因地区而异的规则项，全部持久化 */
 data class RuleSettings(
+    /** 玩法：四川麻将（血战到底）/ 国标麻将（MCR）。默认四川，保持老用户不变。 */
+    val gameMode: GameMode = GameMode.SICHUAN,
+
+    // MARK: 国标专用
+    /** 圈风 0–3 = 东南西北 */
+    val mcrPrevalentWind: Int = 0,
+    /** 门风（自己的座位风）0–3 = 东南西北 */
+    val mcrSeatWind: Int = 0,
+
+    // MARK: 国标「规则细则」——各地规则书有分歧的地方，默认值 = 既有行为
+    /** 字一色是否同时计混幺九（+32） */
+    val mcrZiYiSeCountsHunYaoJiu: Boolean = true,
+    /** 九莲宝灯是否同时计双暗刻（+2） */
+    val mcrJiuLianCountsShuangAnKe: Boolean = true,
+    /** 七对中四张相同是否可当两对 */
+    val mcrSevenPairsAllowsQuadAsTwoPairs: Boolean = true,
+    /** 三杠时是否再单独计每个杠（明杠 1 / 暗杠 2） */
+    val mcrPerKongFanWithThreeKongs: Boolean = true,
+    /** 边张/坎张/单钓将：true = 就高不就低跨解法取最优；false = 仅当听法唯一时才计 */
+    val mcrWaitFanHighestReading: Boolean = true,
+
     /** 底分（0 番平胡的单家金额） */
     val baseStake: Double = 1.0,
     /** 封顶番数；0 = 不封顶（默认） */
@@ -71,6 +92,16 @@ data class RuleSettings(
     /** 杠上开花 +1 番 */
     val kongBloomEnabled: Boolean = true,
 ) {
+    /** 传给国标算番引擎的规则细则 */
+    val mcrOptions: MCROptions
+        get() = MCROptions(
+            mcrZiYiSeCountsHunYaoJiu = mcrZiYiSeCountsHunYaoJiu,
+            mcrJiuLianCountsShuangAnKe = mcrJiuLianCountsShuangAnKe,
+            mcrSevenPairsAllowsQuadAsTwoPairs = mcrSevenPairsAllowsQuadAsTwoPairs,
+            mcrPerKongFanWithThreeKongs = mcrPerKongFanWithThreeKongs,
+            mcrWaitFanHighestReading = mcrWaitFanHighestReading,
+        )
+
     companion object {
         val fanCapChoices = listOf(0, 3, 4, 5)
 
@@ -111,6 +142,8 @@ data class FanItem(
     val fan: Int,
     /** 额外加底单位数（加底类：根加底 / 自摸加底，进金额不进番） */
     val baseAdd: Int = 0,
+    /** 同一番型命中的次数（国标用：箭刻 ×2、幺九刻 ×3、花牌 ×n…）。四川一律 1。 */
+    val count: Int = 1,
 ) {
     /** 中文加成文字（日志/测试用；UI 显示走本地化格式） */
     val fanText: String
