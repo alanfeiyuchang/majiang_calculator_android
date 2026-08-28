@@ -53,6 +53,21 @@ private const val NEAR_FIELD_RATIO = 0.70f
 /** 区域在牌框并集之外再放出去的余量，单位是「平均牌高」的倍数。给大了薄薄的单排手牌 IoU 掉得很快。 */
 private const val REGION_PAD_TILES = 0.20f
 
+/**
+ * 行内切簇的间距阈值，单位是「平均牌宽」的倍数。
+ *
+ * 在 12 张实拍上量过（只统计「自己的牌」那些行，n=133 个间距）：
+ *   组内相邻牌      -0.35 … +0.05   （牌挨着摆，检测框还略有重叠）
+ *   组与组之间      +0.72、+1.18    （照片 04，一行摆了几副副露）
+ * 中间 0.05–0.72 是一片空白，分界很干净。
+ *
+ * 原值 0.9 **比观测到的最小真实组间间距（0.72）还大**，等于那条边界根本没被切开，
+ * 只能靠簇内的贪心解析去救；国标的吃摆得离手牌近一点就会被并进手牌。
+ * 0.35 取在空白区间里：高于组内上限 0.05（也高于合成测试里的 0.10）7 倍，
+ * 又比 0.72 低一半。改成 0.35 后 12 张实拍走完整链路的结果逐字节不变。
+ */
+private const val COL_GAP_TILES = 0.35f
+
 /** 闭包吸收阈值：已经有这么大比例压在框内的检测框会被并进来。 */
 private const val CLOSURE_OVERLAP = 0.5f
 
@@ -105,10 +120,9 @@ private fun group(boxes: List<TileBox>, guessConcealedKong: Boolean, mode: GameM
         }
     }
 
-    // ② 行内按横向间距切簇。0.9 而不是 0.55：立着摆的手牌彼此有缝，阈值太小会把一排
-    //    切成好几段，碎出来的单张再被当成暗杠。桌上副露与手牌的间隔通常大于一张牌宽。
+    // ② 行内按横向间距切簇（阈值见 COL_GAP_TILES）
     val avgW = boxes.map { it.width }.sum() / boxes.size
-    val colGap = maxOf(avgW * 0.9f, 1f)
+    val colGap = maxOf(avgW * COL_GAP_TILES, 1f)
     val clusters = mutableListOf<List<TileBox>>()
     for (row in rows) {
         val sorted = row.sortedBy { it.minX }
