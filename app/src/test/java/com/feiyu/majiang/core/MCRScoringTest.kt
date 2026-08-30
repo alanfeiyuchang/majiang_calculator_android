@@ -459,9 +459,10 @@ class MCRScoringTest {
             has = listOf("海底捞月")
         )
         expect(
+            // 和牌张在立牌里只能有一张，否则牌面就否掉了抢杠和 / 和绝张（见 REV 组）
             "F8-8 抢杠和",
-            msc("123m456m789m123p11p", win = "1p") { it.copy(robbingKong = true, lastTileOfKind = true) },
-            has = listOf("抢杠和"), hasnt = listOf("和绝张")
+            msc("123m456m789m234p11p", win = "2p") { it.copy(robbingKong = true, lastTileOfKind = true) },
+            points = 29, has = listOf("抢杠和"), hasnt = listOf("和绝张")
         )
     }
 
@@ -526,8 +527,8 @@ class MCRScoringTest {
         )
         expect(
             "F4-4 和绝张",
-            msc("123m456m789m123p11p", win = "1p") { it.copy(lastTileOfKind = true) },
-            has = listOf("和绝张")
+            msc("123m456m789m234p11p", win = "2p") { it.copy(lastTileOfKind = true) },
+            points = 25, has = listOf("和绝张")
         )
     }
 
@@ -597,6 +598,31 @@ class MCRScoringTest {
     }
 
     // MARK: - 不重复计算原则
+
+    /** 场景番：牌面与勾选矛盾时以牌面为准 */
+    @Test
+    fun rev_boardOverridesCheckboxes() {
+        // 抢杠和抢的是别人补杠的第 4 张，自己手上不可能还留着同一张。
+        // 123p + 11p 里 1 筒有 3 张，和 1 筒就不可能是抢杠和。
+        expect(
+            "REV1 立牌里还有和牌张 → 撤销抢杠和",
+            msc("123m456m789m123p11p", win = "1p") { it.copy(robbingKong = true) },
+            points = 22, hasnt = listOf("抢杠和")
+        )
+        expect(
+            "REV2 立牌里还有和牌张 → 撤销和绝张",
+            msc("123m456m789m123p11p", win = "1p") { it.copy(lastTileOfKind = true) },
+            points = 22, hasnt = listOf("和绝张")
+        )
+        expect(
+            "REV3 手里没有杠 → 撤销杠上开花",
+            msc("123m456m789m123p11p", win = "1p", selfDrawn = true) { it.copy(kongBloom = true) },
+            hasnt = listOf("杠上开花")
+        )
+        // 反过来：另外 3 张明着在副露里，不必等用户勾也是绝张
+        val auto = msc("123m456m789s11p", melds = listOf(mm(Meld.Kind.PONG, "9s")), win = "9s")
+        assertTrue("REV4 副露里已有 3 张 → 自动判绝张", names(auto).contains("和绝张"))
+    }
 
     @Test
     fun p_nonRepeatPrinciples() {
