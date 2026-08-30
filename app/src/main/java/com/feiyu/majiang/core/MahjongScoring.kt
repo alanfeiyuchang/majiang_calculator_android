@@ -44,17 +44,21 @@ data class RuleSettings(
     /** 门风（自己的座位风）0–3 = 东南西北 */
     val mcrSeatWind: Int = 0,
 
-    // MARK: 国标「规则细则」——各地规则书有分歧的地方，默认值 = 既有行为
-    /** 字一色是否同时计混幺九（+32） */
-    val mcrZiYiSeCountsHunYaoJiu: Boolean = true,
-    /** 九莲宝灯是否同时计双暗刻（+2） */
+    // MARK: 国标「规则细则」——各地规则书有分歧的地方。
+    // 默认值一律对齐官方竞赛算番器（见 MCROptions），不是「保持既有行为」——
+    // 既有的那几个默认值本身就和官方对不上，属于算错，1.4 起用版本号一次性纠正。
+    /** 字一色是否同时计混幺九（+32）。官方不计 */
+    val mcrZiYiSeCountsHunYaoJiu: Boolean = false,
+    /** 九莲宝灯是否同时计双暗刻（+2）。官方计 */
     val mcrJiuLianCountsShuangAnKe: Boolean = true,
     /** 七对中四张相同是否可当两对 */
     val mcrSevenPairsAllowsQuadAsTwoPairs: Boolean = true,
-    /** 三杠时是否再单独计每个杠（明杠 1 / 暗杠 2） */
-    val mcrPerKongFanWithThreeKongs: Boolean = true,
+    /** 三杠时是否再单独计每个杠（明杠 1 / 暗杠 2）。官方：三杠 32 分已涵盖，不再单计 */
+    val mcrPerKongFanWithThreeKongs: Boolean = false,
     /** 边张/坎张/单钓将：true = 就高不就低跨解法取最优；false = 仅当听法唯一时才计 */
     val mcrWaitFanHighestReading: Boolean = true,
+    /** 一明杠 + 一暗杠是否计「明暗杠」5 分（不在 98 规则 81 番内，但官方算番器计） */
+    val mcrOneOpenOneConcealedKong: Boolean = true,
 
     /** 底分（0 番平胡的单家金额） */
     val baseStake: Double = 1.0,
@@ -100,6 +104,7 @@ data class RuleSettings(
             mcrSevenPairsAllowsQuadAsTwoPairs = mcrSevenPairsAllowsQuadAsTwoPairs,
             mcrPerKongFanWithThreeKongs = mcrPerKongFanWithThreeKongs,
             mcrWaitFanHighestReading = mcrWaitFanHighestReading,
+            mcrOneOpenOneConcealedKong = mcrOneOpenOneConcealedKong,
         )
 
     companion object {

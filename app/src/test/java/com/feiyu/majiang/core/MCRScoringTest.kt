@@ -206,7 +206,10 @@ class MCRScoringTest {
 
     @Test
     fun t_fanTableIntegrity() {
-        assertEquals("T1 番种表恰好 81 种", 81, MCR_FAN_POINTS.size)
+        // 官方 81 番 + 明暗杠。明暗杠不在 98 规则的 81 番里，但现行通行（含官方竞赛
+        // 算番器）把「一明杠 + 一暗杠」当独立番种计 5 分，由 mcrOneOpenOneConcealedKong 控制。
+        assertEquals("T1 番种表 = 官方 81 种 + 明暗杠", 82, MCR_FAN_POINTS.size)
+        assertEquals("T1b 明暗杠 5 分", 5, MCR_FAN_POINTS["明暗杠"])
 
         val unknown = MCR_FAN_EXCLUDES.flatMap { listOf(it.key) + it.value }
             .filter { MCR_FAN_POINTS[it] == null }
@@ -232,7 +235,7 @@ class MCRScoringTest {
         val missing = MCR_FAN_POINTS.keys.filter { MCRFanInfo.table[it] == null }
         assertTrue("每个番型都要有一句话含义：$missing", missing.isEmpty())
         val grouped = MCRFanInfo.groups.flatMap { it.second }
-        assertEquals("分档表覆盖全部 81 种", MCR_FAN_POINTS.keys.sorted(), grouped.sorted())
+        assertEquals("分档表覆盖全部番种", MCR_FAN_POINTS.keys.sorted(), grouped.sorted())
         val wrong = MCRFanInfo.groups.flatMap { (p, ns) -> ns.filter { MCR_FAN_POINTS[it] != p } }
         assertTrue("分档表的分值要对得上：$wrong", wrong.isEmpty())
     }
@@ -254,8 +257,10 @@ class MCRScoringTest {
             has = listOf("绿一色"), hasnt = listOf("缺一门")
         )
         expect(
-            "F88-4 九莲宝灯", msc("11123456789995m", win = "5m"),
-            has = listOf("九莲宝灯"), hasnt = listOf("清一色", "门前清", "无字", "幺九刻")
+            // 九莲宝灯把幺九刻**减 1**（不是整个吸收）：手里 111/999 两个幺九刻时官方留 1 个。
+            // 官方 91 = 九莲宝灯 88 + 双暗刻 2 + 幺九刻 1。
+            "F88-4 九莲宝灯", msc("11123456789995m", win = "5m"), points = 91,
+            has = listOf("九莲宝灯", "幺九刻"), hasnt = listOf("清一色", "门前清", "无字")
         )
         expect(
             "F88-5 四杠",
@@ -395,8 +400,8 @@ class MCRScoringTest {
             has = listOf("三色双龙会"), hasnt = listOf("喜相逢", "老少副", "无字", "平和")
         )
         expect(
-            "F16-3 一色三步高", msc("123234345m789m55m", win = "5m"),
-            has = listOf("一色三步高"), hasnt = listOf("连六", "老少副")
+            "F16-3 一色三步高", msc("123234345m789m55m", win = "5m"), points = 45,
+            has = listOf("一色三步高", "清一色", "老少副")
         )
         expect(
             "F16-4 全带五", msc("345m456p567s555m55s", win = "5s"),
@@ -533,8 +538,9 @@ class MCRScoringTest {
         expect("F2-1 箭刻", msc("555z123m456m789m11p", win = "1p"), has = listOf("箭刻"))
         expect(
             "F2-2 圈风刻/门风刻",
+            // 同一副风刻已按圈风刻/门风刻计过，不再重复计幺九刻（官方 24 分）
             msc("111z123m456m789m11p", win = "1p") { it.copy(prevalentWind = 0, seatWind = 0) },
-            has = listOf("圈风刻", "门风刻", "幺九刻")
+            points = 24, has = listOf("圈风刻", "门风刻"), hasnt = listOf("幺九刻")
         )
         expect(
             "F2-2b 只有圈风",
@@ -570,10 +576,12 @@ class MCRScoringTest {
             has = listOf("明杠")
         )
         expect("F1-7 缺一门", msc("123m456m789m123p55p", win = "5p"), has = listOf("缺一门"))
-        expect("F1-8 无字", msc("123m456p789s234m55s", win = "5s"), has = listOf("无字"))
+        // 平和会吸收无字，所以举例得挑个非平和的牌型（官方：四暗刻+幺九刻+缺一门+无字+单钓将 = 69）
+        expect("F1-8 无字", msc("111m444m777m999m22p", win = "2p"), has = listOf("无字"))
         expect("F1-9 边张", msc("123456789m23455p", win = "3m"), has = listOf("边张"))
         expect("F1-10 坎张", msc("123456789m23455p", win = "2m"), has = listOf("坎张"))
-        expect("F1-11 单钓将", msc("123456789m23455p", win = "5p"), has = listOf("单钓将"))
+        // 单钓将要求独听。123456789m2345p 听 2m/5m/5筒 不止一张，官方也不给——换成真独听的
+        expect("F1-11 单钓将", msc("111m444m777m999m22p", win = "2p"), has = listOf("单钓将"))
         expect(
             "F1-12 自摸",
             msc(
@@ -594,12 +602,17 @@ class MCRScoringTest {
     fun p_nonRepeatPrinciples() {
         // 不可拆分 + 就高不就低
         val p1 = msc("123123456789m55p", win = "5p")
-        assertTrue("P1 清龙优先，不再拆出一般高", names(p1).contains("清龙") && !names(p1).contains("一般高"))
+        // 官方算番器：清龙 16 + 门前清 2 + 平和 2 + 一般高 1 + 缺一门 1 + 单钓将 1 = 23。
+        // 一般高**照计**——原则 5 允许尚未组合过的那副牌同已组合过的套算一次。
+        expect("P1 清龙与一般高并存", p1, points = 23, has = listOf("清龙", "一般高"))
 
         // 套算一次：一副面子只能配一次
         val p2 = msc("123123m123p456s55m", win = "5m")
         val pairFan = p2.items.filter { it.name in listOf("一般高", "喜相逢") }.sumOf { it.fan }
-        assertEquals("P2 套算一次：配对番合计 1 分", 1, pairFan)
+        // 官方算番器：门前清 2 + 平和 2 + 一般高 1 + 喜相逢 1 + 单钓将 1 = 7。
+        // 4 副顺子最多 3 个配对番，这里 3 副参与、拿到 2 个。
+        assertEquals("P2 套算一次：一般高 + 喜相逢 = 2 分", 2, pairFan)
+        assertEquals("P2b 官方总分 7", 7, p2.scoringPoints)
 
         val p3 = msc(
             "456m55m",
@@ -641,12 +654,13 @@ class MCRScoringTest {
     @Test
     fun q_minimumPoints() {
         val q1 = msc("678m345p567s55p", melds = listOf(mm(Meld.Kind.CHOW, "2m")), win = "7s")
-        assertEquals("Q1 5 分不到起和线", 5, q1.scoringPoints)
+        // 平和2 + 断幺2 = 4 分（无字被平和吸收——官方算番器同样是 4 分）
+        assertEquals("Q1 4 分不到起和线", 4, q1.scoringPoints)
         assertFalse("Q1 不够起和", q1.meetsMinimum)
 
         val q2 = msc("678m345p567s55p", melds = listOf(mm(Meld.Kind.CHOW, "2m")), win = "7s", flowers = 3)
-        assertEquals("Q2 花牌不算起和分（总分）", 8, q2.totalPoints)
-        assertEquals("Q2 花牌不算起和分（起和分）", 5, q2.scoringPoints)
+        assertEquals("Q2 花牌不算起和分（总分）", 7, q2.totalPoints)
+        assertEquals("Q2 花牌不算起和分（起和分）", 4, q2.scoringPoints)
         assertFalse("Q2 仍不够起和", q2.meetsMinimum)
 
         assertTrue("Q3 门前清+清龙 达到起和线", msc("123m456m789m123p55p", win = "5p").meetsMinimum)
@@ -670,10 +684,11 @@ class MCRScoringTest {
         assertEquals("O0 设置默认值 = 引擎默认", MCROptions(), RuleSettings().mcrOptions)
         val d = RuleSettings()
         assertTrue(
-            "O0b 5 项规则细则默认全开",
-            d.mcrZiYiSeCountsHunYaoJiu && d.mcrJiuLianCountsShuangAnKe &&
-                d.mcrSevenPairsAllowsQuadAsTwoPairs && d.mcrPerKongFanWithThreeKongs &&
-                d.mcrWaitFanHighestReading
+            // 默认值对齐官方算番器：字一色计混幺九、三杠再计每个杠这两项官方不这么算，默认关。
+            "O0b 规则细则默认值 = 官方算番器",
+            !d.mcrZiYiSeCountsHunYaoJiu && d.mcrJiuLianCountsShuangAnKe &&
+                d.mcrSevenPairsAllowsQuadAsTwoPairs && !d.mcrPerKongFanWithThreeKongs &&
+                d.mcrWaitFanHighestReading && d.mcrOneOpenOneConcealedKong
         )
     }
 
@@ -695,11 +710,34 @@ class MCRScoringTest {
         assertEquals(GameMode.SICHUAN, RuleSettingsStore.decode(JSONObject("{}")).gameMode)
     }
 
+    /** 存档迁移：1.3 及以前那三项国标默认值与官方算番器不符，升级时一次性纠正 */
+    @Test
+    fun mig_legacyArchiveGetsOfficialMCRDefaults() {
+        val legacy = RuleSettingsStore.decode(
+            JSONObject(
+                """{"baseStake":1,"gameMode":"mcr",
+                    "mcrZiYiSeCountsHunYaoJiu":true,
+                    "mcrJiuLianCountsShuangAnKe":true,
+                    "mcrPerKongFanWithThreeKongs":true}"""
+            )
+        )
+        assertFalse("MIG1a 字一色不再计混幺九", legacy.mcrZiYiSeCountsHunYaoJiu)
+        assertTrue("MIG1b 九莲计双暗刻（官方就这么算）", legacy.mcrJiuLianCountsShuangAnKe)
+        assertFalse("MIG1c 三杠不再单计每个杠", legacy.mcrPerKongFanWithThreeKongs)
+        // 迁移只做一次：重新编码后带上版本号，再解码时用户自己的选择要保住
+        val custom = legacy.copy(mcrZiYiSeCountsHunYaoJiu = true)   // 用户主动打开
+        val round = RuleSettingsStore.decode(RuleSettingsStore.encode(custom))
+        assertTrue("MIG2 迁移后用户自己的选择不再被覆盖", round.mcrZiYiSeCountsHunYaoJiu)
+        // 迁移不碰其它设置
+        assertEquals("MIG3 迁移不影响其它设置", GameMode.MCR, legacy.gameMode)
+        assertEquals(1.0, legacy.baseStake, 1e-9)
+    }
+
     /** ① 字一色是否同时计混幺九（+32） */
     @Test
     fun o1_ziYiSeCountsHunYaoJiu() {
         val hand = "222333444z55566z"
-        val on = msc(hand, win = "6z")
+        val on = msc(hand, win = "6z", options = MCROptions(mcrZiYiSeCountsHunYaoJiu = true))
         val off = msc(hand, win = "6z", options = MCROptions(mcrZiYiSeCountsHunYaoJiu = false))
         expect("O1a 字一色计混幺九（开）= 175 分", on, points = 175, has = listOf("字一色", "混幺九"))
         expect("O1b 字一色不计混幺九（关）= 143 分", off, points = 143, has = listOf("字一色"), hasnt = listOf("混幺九"))
@@ -708,8 +746,8 @@ class MCRScoringTest {
     /** ② 九莲宝灯是否同时计双暗刻（+2） */
     @Test
     fun o2_jiuLianCountsShuangAnKe() {
-        val hand = "11123456789995m"
-        val on = msc(hand, win = "5m")
+        val hand = "11123455678999m"
+        val on = msc(hand, win = "5m", options = MCROptions(mcrJiuLianCountsShuangAnKe = true))
         val off = msc(hand, win = "5m", options = MCROptions(mcrJiuLianCountsShuangAnKe = false))
         expect("O2a 九莲宝灯计双暗刻（开）= 91 分", on, points = 91, has = listOf("九莲宝灯", "双暗刻"))
         expect("O2b 九莲宝灯不计双暗刻（关）= 89 分", off, points = 89, has = listOf("九莲宝灯"), hasnt = listOf("双暗刻"))
@@ -722,16 +760,19 @@ class MCRScoringTest {
         // 不当两对 → 退回标准型 123/123/456/456 + 11 将 = 32 分
         val on = msc("11112233445566m", win = "6m")
         val off = msc("11112233445566m", win = "6m", options = MCROptions(mcrSevenPairsAllowsQuadAsTwoPairs = false))
-        expect("O3a 4 张可当两对（开）= 48 分", on, points = 48, has = listOf("七对", "清一色"))
+        // 官方 50：七对 24 + 清一色 24 + **四归一 2**。七对可计四归一。
+        expect("O3a 4 张可当两对（开）= 50 分", on, points = 50, has = listOf("七对", "清一色", "四归一"))
+        // 关掉后退回标准型：清一色24 + 一般高1 + 连六×2 + 平和2 + 四归一2 + 门前清2 = 33
         expect(
-            "O3b 4 张不可当两对（关）= 32 分", off, points = 32,
+            "O3b 4 张不可当两对（关）= 33 分", off, points = 33,
             has = listOf("清一色", "一般高", "平和", "四归一"), hasnt = listOf("七对")
         )
 
         // 退不回标准型的牌：关掉后这副牌在这套规则下根本不成和，0 分
         val on2 = msc("1111335577m1133p", win = "3p")
         val off2 = msc("1111335577m1133p", win = "3p", options = MCROptions(mcrSevenPairsAllowsQuadAsTwoPairs = false))
-        expect("O3c 无标准型可退（开）= 26 分", on2, points = 26, has = listOf("七对"))
+        // 官方 28：七对 24 + 缺一门 1 + 无字 1 + **四归一 2**
+        expect("O3c 无标准型可退（开）= 28 分", on2, points = 28, has = listOf("七对", "四归一"))
         assertEquals("O3d 无标准型可退（关）= 0 分（不成和）", 0, off2.scoringPoints)
         assertTrue(off2.items.isEmpty())
         assertFalse(off2.meetsMinimum)
@@ -744,7 +785,7 @@ class MCRScoringTest {
             mm(Meld.Kind.EXPOSED_KONG, "2s"), mm(Meld.Kind.EXPOSED_KONG, "3s"),
             mm(Meld.Kind.CONCEALED_KONG, "4s")
         )
-        val on = msc("123m11p", melds = kongs, win = "1p")
+        val on = msc("123m11p", melds = kongs, win = "1p", options = MCROptions(mcrPerKongFanWithThreeKongs = true))
         val off = msc("123m11p", melds = kongs, win = "1p", options = MCROptions(mcrPerKongFanWithThreeKongs = false))
         expect("O4a 三杠再计每个杠（开）= 73 分", on, points = 73, has = listOf("三杠", "明杠", "暗杠"))
         expect("O4b 三杠不再计每个杠（关）= 69 分", off, points = 69, has = listOf("三杠"), hasnt = listOf("明杠", "暗杠"))
@@ -756,19 +797,21 @@ class MCRScoringTest {
         // 123456789万 + 345筒 + 55筒，和 5 筒：既能读成单钓将，也能读成 345 筒里的一张
         val on = msc("123m456m789m34555p", win = "5p")
         val off = msc("123m456m789m34555p", win = "5p", options = MCROptions(mcrWaitFanHighestReading = false))
-        expect("O5a 听法有歧义，就高（开）= 23 分", on, points = 23, has = listOf("单钓将"))
-        expect("O5b 听法有歧义，不计（关）= 22 分", off, points = 22, hasnt = listOf("单钓将", "边张", "坎张"))
+        // 官方：这手听法有歧义 → 不是独听 → 边张/坎张/单钓将一个都不给（21 分）。
+        // 「就高」开关只在**独听**成立、但拆解读法不唯一时才起作用。
+        expect("O5a 听法有歧义时不给听牌番（开）= 21 分", on, points = 21, hasnt = listOf("单钓将", "边张", "坎张"))
+        expect("O5b 听法有歧义，不计（关）= 21 分", off, points = 21, hasnt = listOf("单钓将", "边张", "坎张"))
 
         // 听法唯一的边张 / 坎张：两种设置下都照计，关掉不等于永远不给
         val strict = MCROptions(mcrWaitFanHighestReading = false)
-        expect("O5c 唯一边张（开）= 23 分", msc("123456789m23455p", win = "3m"), points = 23, has = listOf("边张"))
+        expect("O5c 唯一边张（开）= 22 分", msc("123456789m23455p", win = "3m"), points = 22, has = listOf("边张"))
         expect(
-            "O5d 唯一边张（关）= 23 分", msc("123456789m23455p", win = "3m", options = strict),
-            points = 23, has = listOf("边张")
+            "O5d 唯一边张（关）= 22 分", msc("123456789m23455p", win = "3m", options = strict),
+            points = 22, has = listOf("边张")
         )
         expect(
-            "O5e 唯一坎张（关）= 23 分", msc("123456789m23455p", win = "2m", options = strict),
-            points = 23, has = listOf("坎张")
+            "O5e 唯一坎张（关）= 22 分", msc("123456789m23455p", win = "2m", options = strict),
+            points = 22, has = listOf("坎张")
         )
     }
 

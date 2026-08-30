@@ -42,21 +42,31 @@ package com.feiyu.majiang.core
  * 字段名与持久化的设置键（RuleSettings 同名字段）严格一致，两端（iOS / Android）通用。
  * 默认值 = 本引擎的既有行为。
  */
+/**
+ * 各地规则书写法不一致的几处。**默认值对齐官方竞赛算番器**
+ * （北大 Botzone / ChineseOfficialMahjongHelper）——前两项里字一色那条默认关，
+ * 因为官方不这么算；想要本地变体的把对应开关打开。
+ */
 data class MCROptions(
-    /** 字一色是否同时计混幺九（+32） */
-    val mcrZiYiSeCountsHunYaoJiu: Boolean = true,
-    /** 九莲宝灯是否同时计双暗刻（+2） */
+    /** 字一色是否同时计混幺九（+32）。官方不计 */
+    val mcrZiYiSeCountsHunYaoJiu: Boolean = false,
+    /** 九莲宝灯是否同时计双暗刻（+2）。官方计 */
     val mcrJiuLianCountsShuangAnKe: Boolean = true,
     /** 七对中四张相同是否可当两对 */
     val mcrSevenPairsAllowsQuadAsTwoPairs: Boolean = true,
-    /** 三杠时是否再单独计每个杠（明杠 1 / 暗杠 2） */
-    val mcrPerKongFanWithThreeKongs: Boolean = true,
+    /** 三杠时是否再单独计每个杠（明杠 1 / 暗杠 2）。官方：三杠 32 分已涵盖，不再单计 */
+    val mcrPerKongFanWithThreeKongs: Boolean = false,
     /**
      * 边张 / 坎张 / 单钓将的读法：
      * true  = 就高不就低，跨所有拆解取最优的那种听法；
      * false = 只有当所有拆解读出同一种听法时才计（听法不唯一就不计）。
      */
     val mcrWaitFanHighestReading: Boolean = true,
+    /**
+     * 一明杠 + 一暗杠算不算「明暗杠」5 分。
+     * true = 现行通行（官方竞赛算番器就是这么算的）；false = 严格 98，拆成明杠 1 + 暗杠 2
+     */
+    val mcrOneOpenOneConcealedKong: Boolean = true,
 )
 
 // MARK: - 面子
@@ -151,6 +161,9 @@ val MCR_FAN_POINTS: Map<String, Int> = mapOf(
     "妙手回春" to 8, "海底捞月" to 8, "杠上开花" to 8, "抢杠和" to 8,
     // 6
     "碰碰和" to 6, "混一色" to 6, "三色三步高" to 6, "五门齐" to 6,
+        // 非官方 81 番之一：一明杠 + 一暗杠。严格 98 规则拆成 明杠1 + 暗杠2 = 3 分，
+    // 现行通行（及官方竞赛算番器）作为一个独立番种计 5 分，由开关控制。
+    "明暗杠" to 5,
     "全求人" to 6, "双暗杠" to 6, "双箭刻" to 6,
     // 4
     "全带幺" to 4, "不求人" to 4, "双明杠" to 4, "和绝张" to 4,
@@ -165,58 +178,63 @@ val MCR_FAN_POINTS: Map<String, Int> = mapOf(
 
 /** 不可重复原则的排除表：key 番型成立时，把 value 里的番型整条删掉 */
 val MCR_FAN_EXCLUDES: Map<String, List<String>> = mapOf(
+    // 无字被这些吸收（官方 §2.4）：平和、断幺、清一色、全大/全中/全小、
+    // 大于五/小于五、全双刻、全带五、三色双龙会、一色双龙会
+    "平和" to listOf("无字"),
+    "断幺" to listOf("无字"),
     "大四喜" to listOf("三风刻", "圈风刻", "门风刻", "碰碰和", "幺九刻"),
     "大三元" to listOf("箭刻", "双箭刻"),
-    "绿一色" to listOf("缺一门"),
-    "九莲宝灯" to listOf("清一色", "门前清", "无字", "幺九刻"),
+    "绿一色" to listOf("缺一门", "混一色"),
+    "九莲宝灯" to listOf("清一色", "门前清", "无字", "不求人"),
     "四杠" to listOf("三杠", "双明杠", "双暗杠", "明杠", "暗杠", "碰碰和", "单钓将"),
     "连七对" to listOf("七对", "清一色", "门前清", "无字", "单钓将", "不求人"),
-    "十三幺" to listOf("五门齐", "门前清", "单钓将", "不求人"),
+    "十三幺" to listOf("五门齐", "门前清", "单钓将", "不求人", "混幺九", "清幺九"),
 
-    "清幺九" to listOf("碰碰和", "全带幺", "幺九刻", "无字"),
-    "小四喜" to listOf("三风刻"),
+    "清幺九" to listOf("碰碰和", "全带幺", "幺九刻", "无字", "双同刻"),
+    "小四喜" to listOf("三风刻", "幺九刻"),
     "小三元" to listOf("双箭刻", "箭刻"),
     "字一色" to listOf("碰碰和", "全带幺", "幺九刻", "缺一门", "无字"),
-    "四暗刻" to listOf("碰碰和", "门前清", "三暗刻", "双暗刻"),
-    "一色双龙会" to listOf("清一色", "平和", "一般高", "老少副", "喜相逢"),
+    "四暗刻" to listOf("碰碰和", "门前清", "三暗刻", "双暗刻", "不求人"),
+    "一色双龙会" to listOf("清一色", "平和"),
 
-    "一色四同顺" to listOf("一色三同顺", "一般高", "四归一"),
+    "一色四同顺" to listOf("一色三同顺", "四归一"),
     "一色四节高" to listOf("一色三节高", "碰碰和"),
 
-    "一色四步高" to listOf("一色三步高", "连六", "老少副"),
+    "一色四步高" to listOf("一色三步高"),
     "三杠" to listOf("双明杠", "双暗杠"),
     "混幺九" to listOf("碰碰和", "全带幺", "幺九刻"),
 
-    "七对" to listOf("门前清", "单钓将"),
-    "七星不靠" to listOf("全不靠", "五门齐", "门前清", "不求人"),
-    "全双刻" to listOf("碰碰和", "断幺"),
+    "七对" to listOf("门前清", "单钓将", "不求人"),
+    "七星不靠" to listOf("全不靠", "五门齐", "门前清", "不求人", "单钓将"),
+    "全双刻" to listOf("碰碰和", "断幺", "无字"),
     "清一色" to listOf("无字", "缺一门"),
-    "一色三同顺" to listOf("一般高"),
-    "全大" to listOf("无字"),
+    "一色三同顺" to listOf(),
+    "全大" to listOf("无字", "大于五"),
     "全中" to listOf("无字", "断幺"),
-    "全小" to listOf("无字"),
+    "全小" to listOf("无字", "小于五"),
 
-    "清龙" to listOf("连六", "老少副"),
-    "三色双龙会" to listOf("喜相逢", "老少副", "无字", "平和"),
-    "一色三步高" to listOf("连六", "老少副"),
+    "清龙" to listOf(),
+    "三色双龙会" to listOf("无字", "平和"),
+    "一色三步高" to listOf(),
     "全带五" to listOf("断幺", "无字"),
     "三同刻" to listOf("双同刻"),
     "三暗刻" to listOf("双暗刻"),
 
-    "全不靠" to listOf("五门齐", "门前清", "不求人"),
+    "全不靠" to listOf("五门齐", "门前清", "不求人", "单钓将"),
     "大于五" to listOf("无字"),
     "小于五" to listOf("无字"),
 
     "推不倒" to listOf("缺一门"),
-    "三色三同顺" to listOf("喜相逢"),
-    "三色三节高" to listOf("双同刻"),
+    "三色三同顺" to listOf(),
+    "三色三节高" to listOf(),
     "妙手回春" to listOf("自摸"),
     "杠上开花" to listOf("自摸"),
     "抢杠和" to listOf("和绝张"),
 
     "混一色" to listOf("缺一门"),
     "全求人" to listOf("单钓将", "门前清"),
-    "双暗杠" to listOf("暗杠"),
+    "明暗杠" to listOf("明杠", "暗杠"),
+    "双暗杠" to listOf("暗杠", "双暗刻"),
     "双箭刻" to listOf("箭刻"),
 
     "不求人" to listOf("自摸", "门前清"),
@@ -225,13 +243,18 @@ val MCR_FAN_EXCLUDES: Map<String, List<String>> = mapOf(
 
 /** 按规则细则展开后的排除表：关掉「同时计」时，高番型把对应低番型也吃掉 */
 fun mcrFanExcludes(options: MCROptions): Map<String, List<String>> {
-    if (options.mcrZiYiSeCountsHunYaoJiu && options.mcrJiuLianCountsShuangAnKe) return MCR_FAN_EXCLUDES
+    if (options.mcrZiYiSeCountsHunYaoJiu && options.mcrJiuLianCountsShuangAnKe
+        && options.mcrPerKongFanWithThreeKongs) return MCR_FAN_EXCLUDES
     val m = MCR_FAN_EXCLUDES.toMutableMap()
     if (!options.mcrZiYiSeCountsHunYaoJiu) {
         m["字一色"] = (m["字一色"] ?: emptyList()) + "混幺九"
     }
     if (!options.mcrJiuLianCountsShuangAnKe) {
         m["九莲宝灯"] = (m["九莲宝灯"] ?: emptyList()) + "双暗刻"
+    }
+    // 官方：三杠 32 分已经涵盖那三个杠，不再单独计。开关打开才额外计。
+    if (!options.mcrPerKongFanWithThreeKongs) {
+        m["三杠"] = (m["三杠"] ?: emptyList()) + listOf("明杠", "暗杠")
     }
     return m
 }
@@ -250,18 +273,28 @@ private fun mcrFinalize(hits: List<FanHit>, flowers: Int, options: MCROptions): 
         merged[h.name] = (merged[h.name] ?: 0) + h.count
     }
 
-    // 不可重复原则：按原始命中集合一次性删除被包含的低番型
+    // 九莲宝灯把幺九刻**减 1**，不是整个吸收——和三风刻减 3 是同一个套路。
+    // 九种和牌张实测：手里有 111 和 999 两个幺九刻时官方给 1 个，只有一个时给 0 个。
+    if (merged.containsKey("九莲宝灯")) {
+        val n = merged["幺九刻"]
+        if (n != null) { if (n > 1) merged["幺九刻"] = n - 1 else merged.remove("幺九刻") }
+    }
+
+    // 不可重复原则。从**高番到低番**依次处理，而且**已经被删掉的番不再有排除权**——
+    // 十三幺删掉不求人之后，不求人就不该再把自摸一起带走（十三幺自摸要计那 1 分）。
     val excludes = mcrFanExcludes(options)
-    val removed = mutableSetOf<String>()
-    for (name in merged.keys) {
+    val alive = merged.keys.toMutableSet()
+    for (name in merged.keys.sortedByDescending { points(it) }) {
+        if (name !in alive) continue
         for (victim in excludes[name] ?: emptyList()) {
-            if (victim != name) removed.add(victim)
+            if (victim != name) alive.remove(victim)
         }
     }
-    for (name in removed) merged.remove(name)
+    for (name in merged.keys.toList()) if (name !in alive) merged.remove(name)
 
-    // 无番和：除花牌、自摸外没有任何番型
-    val coreTotal = merged.entries.sumOf { (name, n) -> if (name == "自摸") 0 else points(name) * n }
+    // 无番和：一个番种都没有。自摸本身就是 1 分番，不能排除在外——
+    // 否则「只有自摸」的牌会被判成 无番和8 + 自摸1 = 9 分，凭空够到起和线。
+    val coreTotal = merged.entries.sumOf { (name, n) -> points(name) * n }
     val order = mutableListOf<String>()
     if (coreTotal == 0) {
         order.add("无番和")
@@ -366,6 +399,58 @@ private val MCR_REVERSIBLE_TILES = setOf(
 )
 
 /** 整手牌层面的番（与拆解方式无关的部分） */
+/**
+ * 特殊牌型（七对 / 十三幺 / 全不靠 / 组合龙）用的补充番。
+ * 这些牌型拆不出 4 副面子，走不到 mcrCompositionFan，但下面这几个番
+ * 本来就是整手牌属性，从频率数组就能判——漏掉它们正是「计番不全」的来源。
+ * 注意不能在这里判「全双刻」：它要求全部由 2/4/6/8 的**刻子**组成，七对没有刻子。
+ */
+private fun mcrFreqOnlyFan(stats: TileStats): List<FanHit> {
+    val hits = mutableListOf<FanHit>()
+    val tiles = stats.present
+    if (tiles.all { mcrIsTerminal(it) }) hits.add(FanHit("清幺九"))
+    else if (tiles.all { mcrIsTerminalOrHonor(it) }) hits.add(FanHit("混幺九"))
+    var quads = 0
+    for (i in 0 until MCR_TILE_KINDS) if (stats.freq[i] == 4) quads++
+    if (quads > 0) hits.add(FanHit("四归一", quads))
+    return hits
+}
+
+
+/**
+ * 组合龙型里除了那 9 张组合龙之外的部分：1 副面子 + 1 对将。
+ * 拿它去算刻子番与听牌番——组合龙分支本身给不出面子，漏的正是「计番不全」。
+ */
+private fun mcrKnittedExtraSets(concealed: IntArray, melds: List<Meld>): Pair<List<MCRSet>, MCRSet>? {
+    val patterns = listOf(listOf(0, 3, 6), listOf(1, 4, 7), listOf(2, 5, 8))
+    var stripped: IntArray? = null
+    outer@ for (i in 0..2) for (j in 0..2) {
+        if (j == i) continue
+        val k = 3 - i - j
+        val t = concealed.copyOf()
+        var okAll = true
+        for ((suit, pat) in listOf(0 to patterns[i], 1 to patterns[j], 2 to patterns[k])) {
+            for (r in pat) {
+                val idx = suit * 9 + r
+                if (t[idx] > 0) t[idx]-- else okAll = false
+            }
+        }
+        if (okAll) { stripped = t; break@outer }
+    }
+    val rest = stripped ?: return null
+    val meldSets = mcrMeldSets(melds)
+    // 摘掉 9 张后只剩「1 面子 + 将」= 5 张（或副露占了那副面子时只剩将 = 2 张）。
+    // mcrDecompose 按「14 − 3×副露数」校验张数，所以要按 3 + melds.size 组副露去调。
+    for (d in mcrDecompose(rest, 3 + melds.size)) {
+        if (d.handSets.size + meldSets.size == 1) return (d.handSets + meldSets) to d.pair
+    }
+    if (rest.sum() == 2) {
+        val i = (0 until MCR_TILE_KINDS).firstOrNull { rest[it] == 2 } ?: return null
+        return meldSets to MCRSet(MCRSet.Kind.PAIR, i, true)
+    }
+    return null
+}
+
 private fun mcrWholeHandFan(stats: TileStats): List<FanHit> {
     val hits = mutableListOf<FanHit>()
     val allHonor = stats.present.all { mcrIsHonor(it) }
@@ -390,19 +475,20 @@ private fun mcrWholeHandFan(stats: TileStats): List<FanHit> {
 }
 
 /** 九莲宝灯：门清、一门数牌、1112345678999 + 任意一张 */
-private fun mcrIsNineGates(freq: IntArray, melds: List<Meld>): Boolean {
+private fun mcrIsNineGates(freq: IntArray, melds: List<Meld>, winningTile: Int): Boolean {
     if (melds.isNotEmpty() || freq.sum() != 14) return false
     val suits = (0 until 27).filter { freq[it] > 0 }.map { it / 9 }.toSet()
     if (suits.size != 1 || (27 until 34).any { freq[it] != 0 }) return false
+    if (winningTile < 0 || winningTile >= 27 || freq[winningTile] == 0) return false
     val base = suits.first() * 9
+    if (winningTile / 9 != base / 9) return false
+    // 九莲宝灯看的是**和牌前那 13 张**要正好是 1112345678999。只看和牌后的 14 张，
+    // 会把 11112345678999 也判成九莲——摘掉和的 2 万后剩 1111345678999，
+    // 官方按普通清一色算。
+    val before = freq.copyOf(); before[winningTile] -= 1
     val pattern = intArrayOf(3, 1, 1, 1, 1, 1, 1, 1, 3)
-    var extra = 0
-    for (r in 0..8) {
-        val d = freq[base + r] - pattern[r]
-        if (d < 0) return false
-        extra += d
-    }
-    return extra == 1
+    for (r in 0..8) if (before[base + r] != pattern[r]) return false
+    return true
 }
 
 // MARK: - 面子结构番：集合划分
@@ -519,27 +605,115 @@ private fun mcrBestFanForBlock(block: List<MCRSet>, pair: MCRSet): Pair<String, 
 }
 
 /** 面子结构番：取「总分最高的集合划分」，实现不可拆分 / 套算一次 / 就高不就低 */
+/** 两副顺子能凑成的 1 分番（一般高 / 喜相逢 / 连六 / 老少副） */
+private fun mcrPairChowFan(a: MCRSet, b: MCRSet): String? {
+    if (a.kind != MCRSet.Kind.CHOW || b.kind != MCRSet.Kind.CHOW) return null
+    if (a.suit == b.suit) {
+        if (a.rank == b.rank) return "一般高"
+        if (kotlin.math.abs(a.rank - b.rank) == 3) return "连六"
+        if (setOf(a.rank, b.rank) == setOf(1, 7)) return "老少副"
+        return null
+    }
+    return if (a.rank == b.rank) "喜相逢" else null
+}
+
+/**
+ * 一般高 / 喜相逢 / 连六 / 老少副 的计数上限。
+ *
+ * 规则第 3.9.1.5 条的原则 3（不得相同）与原则 5（套算一次）合起来，等价于在
+ * 「顺子为点、可成番的两副顺子为边」这张图上挑一个边集，满足：
+ *   ① 无环（n 副顺子最多 n−1 条边）—— 原则 5：新的一副只能和已组合过的套算一次
+ *   ② 同一个番种的边彼此不共点 —— 原则 3：已组过某番种的牌不能再组相同番种
+ * 大结构番（清龙/花龙等）占用的面子先并成一个分量，否则会多算。
+ *
+ * 规则书的两个判例正好卡住这两条：
+ *   234567筒 234567条 → 只能「喜相逢×2 + 连六×1」或「喜相逢×1 + 连六×2」
+ *   234条 223344567筒 → 只能「一般高 + 喜相逢 + 连六」，不能「喜相逢×2 + 连六」
+ *
+ * 顺子最多 4 副 ⇒ 最多 6 条边 ⇒ 直接枚举 64 个子集。
+ */
+private fun mcrChowPairFans(sets: List<MCRSet>, alreadyUsed: List<Int> = emptyList()): List<FanHit> {
+    val idx = sets.indices.filter { sets[it].kind == MCRSet.Kind.CHOW }
+    if (idx.size < 2) return emptyList()
+    data class Edge(val a: Int, val b: Int, val name: String, val pts: Int)
+    val edges = mutableListOf<Edge>()
+    for (i in idx.indices) for (j in i + 1 until idx.size) {
+        mcrPairChowFan(sets[idx[i]], sets[idx[j]])?.let {
+            edges.add(Edge(idx[i], idx[j], it, points(it)))
+        }
+    }
+    if (edges.isEmpty()) return emptyList()
+
+    var bestPts = -1
+    var bestNames: List<String> = emptyList()
+    val components = idx.size - maxOf(0, alreadyUsed.size - 1)
+    for (mask in 0 until (1 shl edges.size)) {
+        val chosen = edges.indices.filter { mask and (1 shl it) != 0 }.map { edges[it] }
+        if (chosen.size > components - 1) continue
+
+        val parent = HashMap<Int, Int>()
+        fun find(x: Int): Int {
+            parent.putIfAbsent(x, x)
+            if (parent[x] == x) return x
+            val r = find(parent[x]!!); parent[x] = r; return r
+        }
+        alreadyUsed.firstOrNull()?.let { anchor ->
+            for (u in alreadyUsed.drop(1)) {
+                val ra = find(anchor); val ru = find(u)
+                if (ra != ru) parent[ru] = ra
+            }
+        }
+        var acyclic = true
+        for (e in chosen) {
+            val ra = find(e.a); val rb = find(e.b)
+            if (ra == rb) { acyclic = false; break }
+            parent[ra] = rb
+        }
+        if (!acyclic) continue
+
+        var okMatching = true
+        val usedByName = HashMap<String, MutableSet<Int>>()
+        for (e in chosen) {
+            val used = usedByName.getOrPut(e.name) { mutableSetOf() }
+            if (e.a in used || e.b in used) { okMatching = false; break }
+            used.add(e.a); used.add(e.b)
+        }
+        if (!okMatching) continue
+
+        val pts = chosen.sumOf { it.pts }
+        if (pts > bestPts) { bestPts = pts; bestNames = chosen.map { it.name } }
+    }
+    return bestNames.map { FanHit(it) }
+}
+
 private fun mcrStructureFan(sets: List<MCRSet>, pair: MCRSet): List<FanHit> {
     if (sets.size != 4) return emptyList()
+
+    // 大结构番（3–4 副面子）仍按划分取最优
     var bestTotal = -1
     var bestHits: List<FanHit> = emptyList()
+    var bestUsed: List<Int> = emptyList()
     for (partition in MCR_PARTITIONS_OF_4) {
         var total = 0
         val hits = mutableListOf<FanHit>()
+        val used = mutableListOf<Int>()
         for (block in partition) {
-            val blockSets = block.map { sets[it] }
-            val hit = mcrBestFanForBlock(blockSets, pair)
-            if (hit != null) {
-                total += hit.second
-                hits.add(FanHit(hit.first))
-            }
+            if (block.size < 3) continue
+            val hit = mcrBestFanForBlock(block.map { sets[it] }, pair)
+            if (hit != null) { total += hit.second; hits.add(FanHit(hit.first)); used.addAll(block) }
         }
-        if (total > bestTotal) {
-            bestTotal = total
-            bestHits = hits
-        }
+        if (total > bestTotal) { bestTotal = total; bestHits = hits; bestUsed = used }
     }
-    return bestHits
+
+    val out = bestHits.toMutableList()
+    // 双同刻（两副刻子）走原逻辑：刻子番不受顺子那套约束
+    for (i in 0 until 4) for (j in i + 1 until 4) {
+        val hit = mcrBestFanForBlock(listOf(sets[i], sets[j]), pair)
+        if (hit != null && hit.first == "双同刻") out.add(FanHit(hit.first))
+    }
+    // 两副顺子的 1 分番独立结算：可以和大结构番共用同一副顺子
+    out.addAll(mcrChowPairFans(sets, bestUsed))
+    return out
 }
 
 // MARK: - 字牌番 / 暗刻番 / 杠番
@@ -562,9 +736,20 @@ private fun mcrHonorFan(sets: List<MCRSet>, pair: MCRSet, ctx: MCRContext): List
         hits.add(FanHit("双箭刻"))
     }
     if (dragonPungs.isNotEmpty()) hits.add(FanHit("箭刻", dragonPungs.size))
-    if (windPungs.any { it.tile == 27 + ctx.prevalentWind }) hits.add(FanHit("圈风刻"))
-    if (windPungs.any { it.tile == 27 + ctx.seatWind }) hits.add(FanHit("门风刻"))
-    val yaojiuPungs = pungs.count { mcrIsTerminal(it.tile) || mcrIsWind(it.tile) }
+    // 圈风刻 / 门风刻：同一副风刻既是圈风又是门风时两个都计（官方如此），
+    // 但**已计过的那副刻子不再计幺九刻**——同一组面子不重复得分。
+    val windsScored = mutableSetOf<Int>()
+    if (windPungs.any { it.tile == 27 + ctx.prevalentWind }) {
+        hits.add(FanHit("圈风刻")); windsScored.add(27 + ctx.prevalentWind)
+    }
+    if (windPungs.any { it.tile == 27 + ctx.seatWind }) {
+        hits.add(FanHit("门风刻")); windsScored.add(27 + ctx.seatWind)
+    }
+    // 幺九刻扣掉两类已经另行计分的：① 已计圈风刻/门风刻的那副；
+    // ② 三风刻成立时组成它的 3 副整体减掉（官方明写「减 3」，手里其它的照常计）
+    var yaojiuPungs = pungs.count { mcrIsTerminal(it.tile) || mcrIsWind(it.tile) }
+    yaojiuPungs -= windPungs.count { it.tile in windsScored }
+    if (windPungs.size == 3) yaojiuPungs -= windPungs.count { it.tile !in windsScored }
     if (yaojiuPungs > 0) hits.add(FanHit("幺九刻", yaojiuPungs))
     return hits
 }
@@ -591,8 +776,14 @@ private fun mcrConcealmentFan(sets: List<MCRSet>, options: MCROptions): List<Fan
             }
         }
         else -> {
-            if (exposed == 2) hits.add(FanHit("双明杠")) else if (exposed == 1) hits.add(FanHit("明杠"))
-            if (hidden == 2) hits.add(FanHit("双暗杠")) else if (hidden == 1) hits.add(FanHit("暗杠"))
+            // 一明一暗：现行通行（含官方竞赛算番器）作为「明暗杠」5 分整体计，
+            // 而不是拆成 明杠 1 + 暗杠 2。严格 98 规则把开关关掉即可。
+            if (exposed == 1 && hidden == 1 && options.mcrOneOpenOneConcealedKong) {
+                hits.add(FanHit("明暗杠"))
+            } else {
+                if (exposed == 2) hits.add(FanHit("双明杠")) else if (exposed == 1) hits.add(FanHit("明杠"))
+                if (hidden == 2) hits.add(FanHit("双暗杠")) else if (hidden == 1) hits.add(FanHit("暗杠"))
+            }
         }
     }
     return hits
@@ -632,6 +823,7 @@ private fun mcrSituationalFan(
     fullyConcealed: Boolean,
     allMelded: Boolean,
     singleWait: Boolean,
+    lastTileOfKindByCount: Boolean = false,
 ): List<FanHit> {
     val hits = mutableListOf<FanHit>()
     if (ctx.selfDrawn) {
@@ -645,7 +837,7 @@ private fun mcrSituationalFan(
         if (ctx.lastDiscard) hits.add(FanHit("海底捞月"))
         if (ctx.robbingKong) hits.add(FanHit("抢杠和"))
     }
-    if (ctx.lastTileOfKind) hits.add(FanHit("和绝张"))
+    if (ctx.lastTileOfKind || lastTileOfKindByCount) hits.add(FanHit("和绝张"))
     return hits
 }
 
@@ -709,10 +901,43 @@ fun scoreMCRHand(
     val allMelded = melds.size == 4 && melds.none { it.kind == Meld.Kind.CONCEALED_KONG }
     val flowers = context.flowers
 
+    // 和绝张能从牌面推出来的部分：另外 3 张**明着**在副露里，手里只有和的这一张。
+    // 自己攥着 4 张不算绝张——绝张的含义是别人看得见那 3 张已经出完。
+    val lastTileOfKindByCount = context.winningTile >= 0 &&
+        concealed[context.winningTile] == 1 && meldFreq[context.winningTile] == 3
+
+    // 独听：和牌前那 13 张只等这一张。官方的边张/坎张/单钓将都要求独听。
+    // 用「听牌形状」判，不排除已经用满 4 张的牌：4567条 是两头听，哪怕 7 条
+    // 已经被自己碰光，形状仍然不是独听。（mcrCalculateWaiting 会滤掉摸不到的牌，
+    // 那是给界面显示用的，这里不能用。）
+    val isUniqueWait: Boolean = run {
+        val w = context.winningTile
+        if (w < 0 || concealed[w] == 0) return@run false
+        val before = concealed.copyOf(); before[w] -= 1
+        var cnt = 0
+        for (i in 0 until MCR_TILE_KINDS) {
+            val t = before.copyOf(); t[i] += 1
+            if (mcrIsCompleteHand(t, melds)) { cnt++; if (cnt > 1) break }
+        }
+        cnt == 1
+    }
+    val waitFanNames = setOf("边张", "坎张", "单钓将")
+
+    // 分数打平时的取法：边张 > 坎张 > 单钓将。
+    // 例如 67788 + 和 7：既能读成「89 等 7」（边张），也能读成「68 夹 7」（坎张），
+    // 两种都是 1 分，就高不就低分不出高下。官方算番器取前者，这里跟它一致。
+    fun waitRank(s: MCRScore): Int {
+        val order = mapOf("边张" to 0, "坎张" to 1, "单钓将" to 2)
+        return s.items.mapNotNull { order[it.name] }.minOrNull() ?: 3
+    }
+
     var best: MCRScore? = null
     fun consider(hits: List<FanHit>) {
-        val s = mcrFinalize(hits, flowers, options)
-        if (best == null || s.scoringPoints > best!!.scoringPoints) best = s
+        val filtered = if (isUniqueWait) hits else hits.filter { it.name !in waitFanNames }
+        val s = mcrFinalize(filtered, flowers, options)
+        val b = best
+        if (b == null || s.scoringPoints > b.scoringPoints ||
+            (s.scoringPoints == b.scoringPoints && waitRank(s) < waitRank(b))) best = s
     }
 
     val concealedSum = concealed.sum()
@@ -722,30 +947,33 @@ fun scoreMCRHand(
         // 十三幺
         if (mcrIsThirteenOrphans(full)) {
             val hits = mutableListOf(FanHit("十三幺"))
+            hits.addAll(mcrFreqOnlyFan(stats))
             hits += mcrWholeHandFan(stats)
-            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = true)
+            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = true, lastTileOfKindByCount = lastTileOfKindByCount)
             consider(hits)
         }
         // 七对 / 连七对
         if (mcrIsSevenPairs(full, options.mcrSevenPairsAllowsQuadAsTwoPairs)) {
             val hits = mutableListOf(FanHit(if (mcrIsSevenShiftedPairs(full)) "连七对" else "七对"))
+            hits.addAll(mcrFreqOnlyFan(stats))
             hits += mcrWholeHandFan(stats)
-            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = true)
+            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = true, lastTileOfKindByCount = lastTileOfKindByCount)
             consider(hits)
         }
         // 全不靠 / 七星不靠（可与组合龙叠加）
         if (mcrIsKnittedNoSets(full)) {
             val hits = mutableListOf(FanHit(if (mcrIsSevenStarsKnitted(full)) "七星不靠" else "全不靠"))
             if (mcrHasKnittedStraight(full)) hits.add(FanHit("组合龙"))
+            hits.addAll(mcrFreqOnlyFan(stats))
             hits += mcrWholeHandFan(stats)
-            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = false)
+            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = false, lastTileOfKindByCount = lastTileOfKindByCount)
             consider(hits)
         }
         // 九莲宝灯
-        if (mcrIsNineGates(full, melds)) {
+        if (mcrIsNineGates(full, melds, context.winningTile)) {
             val hits = mutableListOf(FanHit("九莲宝灯"))
             hits += mcrWholeHandFan(stats)
-            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = false)
+            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = false, lastTileOfKindByCount = lastTileOfKindByCount)
             consider(hits)
         }
     }
@@ -753,8 +981,19 @@ fun scoreMCRHand(
     // ── 组合龙型：9 张组合龙在手 + 1 面子（可副露）+ 1 将 ──────────
     if (melds.size <= 1 && mcrIsKnittedStraightForm(concealed, melds.size)) {
         val hits = mutableListOf(FanHit("组合龙"))
+        hits.addAll(mcrFreqOnlyFan(stats))
+        // 组合龙型里那 1 副面子照样要算刻子番与听牌番
+        mcrKnittedExtraSets(concealed, melds)?.let { (extraSets, extraPair) ->
+            hits += mcrHonorFan(extraSets, extraPair, context)
+            hits += mcrConcealmentFan(extraSets, options)
+            for (set in extraSets + extraPair) {
+                if (context.winningTile in set.tiles) {
+                    mcrWaitFanName(set, context.winningTile)?.let { hits.add(FanHit(it)) }
+                }
+            }
+        }
         hits += mcrWholeHandFan(stats)
-        hits += mcrSituationalFan(context, fullyConcealed, allMelded = false, singleWait = false)
+        hits += mcrSituationalFan(context, fullyConcealed, allMelded = false, singleWait = false, lastTileOfKindByCount = lastTileOfKindByCount)
         consider(hits)
     }
 
@@ -783,7 +1022,7 @@ fun scoreMCRHand(
 
             val hits = mutableListOf<FanHit>()
             hits += mcrWholeHandFan(stats)
-            if (mcrIsNineGates(full, melds)) hits.add(FanHit("九莲宝灯"))
+            if (mcrIsNineGates(full, melds, context.winningTile)) hits.add(FanHit("九莲宝灯"))
             hits += mcrStructureFan(sets, pair)
             hits += mcrHonorFan(sets, pair, context)
             hits += mcrConcealmentFan(sets, options)
@@ -796,7 +1035,7 @@ fun scoreMCRHand(
             } else {
                 hits += strictWaitFan
             }
-            hits += mcrSituationalFan(context, fullyConcealed, allMelded, singleWait)
+            hits += mcrSituationalFan(context, fullyConcealed, allMelded, singleWait, lastTileOfKindByCount = lastTileOfKindByCount)
             consider(hits)
         }
     }

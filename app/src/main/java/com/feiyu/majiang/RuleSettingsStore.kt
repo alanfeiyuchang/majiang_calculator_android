@@ -48,9 +48,18 @@ class RuleSettingsStore(context: Context) {
     companion object {
         private const val STORAGE_KEY = "ruleSettings.v1"
 
+        /**
+         * 存档格式版本。1 = 1.3 及以前（国标三项默认值与官方算番器不符）；
+         * 2 = 纠正后。升级时对 v1 存档强制改回官方值——那不是一种可选打法，是算错。
+         */
+        const val CURRENT_SCHEMA_VERSION = 2
+
         // 手写解码：旧版本存档缺新键时用默认值补齐（与 iOS init(from:) 对应）
         fun decode(o: JSONObject): RuleSettings {
             val d = RuleSettings()
+            // 缺键 = 1.3 及以前的存档
+            val needsMCRDefaultsMigration =
+                o.optInt("settingsSchemaVersion", 1) < 2
             val genMode = GenMode.fromRaw(o.optString("genMode", ""))
                 ?: if (o.has("kongCountsAsGen")) {
                     if (o.optBoolean("kongCountsAsGen")) GenMode.FAN else GenMode.OFF  // 旧「杠计根番」布尔迁移
@@ -59,16 +68,18 @@ class RuleSettingsStore(context: Context) {
                 gameMode = GameMode.fromRaw(o.optString("gameMode", "")) ?: d.gameMode,
                 mcrPrevalentWind = o.optInt("mcrPrevalentWind", d.mcrPrevalentWind),
                 mcrSeatWind = o.optInt("mcrSeatWind", d.mcrSeatWind),
-                mcrZiYiSeCountsHunYaoJiu =
-                    o.optBoolean("mcrZiYiSeCountsHunYaoJiu", d.mcrZiYiSeCountsHunYaoJiu),
+                mcrZiYiSeCountsHunYaoJiu = if (needsMCRDefaultsMigration) false
+                    else o.optBoolean("mcrZiYiSeCountsHunYaoJiu", d.mcrZiYiSeCountsHunYaoJiu),
                 mcrJiuLianCountsShuangAnKe =
                     o.optBoolean("mcrJiuLianCountsShuangAnKe", d.mcrJiuLianCountsShuangAnKe),
                 mcrSevenPairsAllowsQuadAsTwoPairs =
                     o.optBoolean("mcrSevenPairsAllowsQuadAsTwoPairs", d.mcrSevenPairsAllowsQuadAsTwoPairs),
-                mcrPerKongFanWithThreeKongs =
-                    o.optBoolean("mcrPerKongFanWithThreeKongs", d.mcrPerKongFanWithThreeKongs),
+                mcrPerKongFanWithThreeKongs = if (needsMCRDefaultsMigration) false
+                    else o.optBoolean("mcrPerKongFanWithThreeKongs", d.mcrPerKongFanWithThreeKongs),
                 mcrWaitFanHighestReading =
                     o.optBoolean("mcrWaitFanHighestReading", d.mcrWaitFanHighestReading),
+                mcrOneOpenOneConcealedKong =
+                    o.optBoolean("mcrOneOpenOneConcealedKong", d.mcrOneOpenOneConcealedKong),
                 baseStake = if (o.has("baseStake")) o.optDouble("baseStake", d.baseStake) else d.baseStake,
                 fanCap = o.optInt("fanCap", d.fanCap),
                 selfDrawAddsFan = o.optBoolean("selfDrawAddsFan", d.selfDrawAddsFan),
@@ -88,6 +99,7 @@ class RuleSettingsStore(context: Context) {
         }
 
         fun encode(s: RuleSettings): JSONObject = JSONObject().apply {
+            put("settingsSchemaVersion", CURRENT_SCHEMA_VERSION)
             put("gameMode", s.gameMode.raw)
             put("mcrPrevalentWind", s.mcrPrevalentWind)
             put("mcrSeatWind", s.mcrSeatWind)
@@ -96,6 +108,7 @@ class RuleSettingsStore(context: Context) {
             put("mcrSevenPairsAllowsQuadAsTwoPairs", s.mcrSevenPairsAllowsQuadAsTwoPairs)
             put("mcrPerKongFanWithThreeKongs", s.mcrPerKongFanWithThreeKongs)
             put("mcrWaitFanHighestReading", s.mcrWaitFanHighestReading)
+            put("mcrOneOpenOneConcealedKong", s.mcrOneOpenOneConcealedKong)
             put("baseStake", s.baseStake)
             put("fanCap", s.fanCap)
             put("selfDrawAddsFan", s.selfDrawAddsFan)
