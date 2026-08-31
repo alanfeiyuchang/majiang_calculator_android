@@ -12,8 +12,10 @@ android {
         applicationId = "com.feiyu.majiang"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // versionCode = 主版本 × 100 + 次版本（1.4 → 104）。
+        // 这样 1.10 → 110、2.0 → 200 仍然是递增的；写成 14 的话 2.0 → 20 会倒退。
+        versionCode = 104
+        versionName = "1.4"
     }
 
     buildTypes {
