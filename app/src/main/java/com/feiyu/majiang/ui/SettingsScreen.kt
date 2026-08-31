@@ -122,25 +122,8 @@ fun SettingsScreen(
             }
 
             if (isMCR) {
-                // 圈风 / 门风
-                SettingsGroup(
-                    header = tr("圈风 / 门风"),
-                    footer = tr("影响圈风刻、门风刻（各 2 分）。门风就是自己的座位风。"),
-                ) {
-                    PickerRow(
-                        title = tr("圈风"),
-                        options = WIND_NAMES.map { tr(it) },
-                        selectedIndex = s.mcrPrevalentWind.coerceIn(0, 3),
-                        onSelect = { i -> store.update { st -> st.copy(mcrPrevalentWind = i) } },
-                    )
-                    SettingsDivider()
-                    PickerRow(
-                        title = tr("门风"),
-                        options = WIND_NAMES.map { tr(it) },
-                        selectedIndex = s.mcrSeatWind.coerceIn(0, 3),
-                        onSelect = { i -> store.update { st -> st.copy(mcrSeatWind = i) } },
-                    )
-                }
+                // 圈风 / 门风 每局都在变（门风每局转一位，四局一圈换圈风），
+                // 埋在设置页里没人会去改，已经挪到主页的滚轮那行。
 
                 // 规则细则：各地规则书有分歧的地方
                 SettingsGroup(
@@ -351,7 +334,8 @@ fun SettingsScreen(
 }
 
 /** 圈风 / 门风的四种风（中文原文即本地化 key） */
-private val WIND_NAMES = listOf("东", "南", "西", "北")
+/** 圈风 / 门风的四种风（中文原文即本地化 key）。主页的滚轮也用这一份 */
+val WIND_NAMES = listOf("东", "南", "西", "北")
 
 @Composable
 private fun SettingsGroup(

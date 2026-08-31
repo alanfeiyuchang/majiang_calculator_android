@@ -96,6 +96,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.feiyu.majiang.L10n
 import com.feiyu.majiang.MahjongViewModel
+import androidx.compose.material.icons.filled.Explore
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.Surface
 import com.feiyu.majiang.RuleSettingsStore
 import com.feiyu.majiang.core.FanItem
 import com.feiyu.majiang.core.GameMode
@@ -243,6 +246,8 @@ fun MainScreen(
     val winCandidates = (0 until MCR_TILE_KINDS).filter { handFreq[it] > 0 }
     // 抢杠和抢的是别人补杠的第 4 张，自己手上不可能还留着同一张
     val robbingKongPossible = winCandidates.any { handFreq[it] == 1 && meldFreq[it] == 0 }
+    // 手上（含副露）有没有风刻——没有的话圈风/门风对分数没影响，据此决定是否提示
+    val hasWindPung = (27..30).any { handFreq[it] + meldFreq[it] >= 3 }
     // 绝张的含义是另外 3 张都在明面上，自己攥着第二张就不是
     val lastTileOfKindPossible = winCandidates.any { handFreq[it] == 1 }
 
@@ -334,6 +339,7 @@ fun MainScreen(
 
     val scrollState = rememberScrollState()
     var resultOffset by remember { mutableFloatStateOf(0f) }
+    var windOffset by remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
 
     // 分析结束后把结果区滚进视野；手牌变了则清空上一局的场景番勾选
@@ -453,8 +459,39 @@ fun MainScreen(
             ) {
                 HandSection(viewModel)
                 MeldSection(viewModel, isMCR)
+                if (isMCR) {
+                    Box(Modifier.onGloballyPositioned { windOffset = it.positionInParent().y }) {
+                        MCRWindSection(
+                            prevalent = settings.mcrPrevalentWind.coerceIn(0, 3),
+                            seat = settings.mcrSeatWind.coerceIn(0, 3),
+                            hasWindPung = hasWindPung,
+                            onPrevalent = { i -> ruleStore.update { it.copy(mcrPrevalentWind = i) } },
+                            onSeat = { i -> ruleStore.update { it.copy(mcrSeatWind = i) } },
+                            onNextHand = {
+                                ruleStore.update {
+                                    // 下一局：门风退一位（庄家轮换，国标不连庄），
+                                    // 门风转回东说明一圈打完、圈风也进一位
+                                    val nextSeat = (it.mcrSeatWind + 3) % 4
+                                    it.copy(
+                                        mcrSeatWind = nextSeat,
+                                        mcrPrevalentWind =
+                                            if (nextSeat == 0) (it.mcrPrevalentWind + 1) % 4
+                                            else it.mcrPrevalentWind,
+                                    )
+                                }
+                            },
+                        )
+                    }
+                }
                 AnalyzeButton(viewModel, onAnalyze = { viewModel.completeCalculation() })
                 RecognitionNoticeBanner(viewModel.recognitionNotice)
+                if (isMCR && viewModel.hasAnalyzed && hasWindPung) {
+                    MCRWindNotice(
+                        prevalent = settings.mcrPrevalentWind.coerceIn(0, 3),
+                        seat = settings.mcrSeatWind.coerceIn(0, 3),
+                        onTap = { scope.launch { scrollState.animateScrollTo(windOffset.toInt()) } },
+                    )
+                }
                 Box(Modifier.onGloballyPositioned { resultOffset = it.positionInParent().y }) {
                     ResultSection(
                         viewModel = viewModel,
@@ -655,6 +692,76 @@ private fun RecognitionNoticeBanner(notice: String?) {
             tint = Color(0xFFFF9500), modifier = Modifier.size(16.dp),
         )
         Text(notice, fontSize = 12.sp, color = Color(0xFFFF9500))
+    }
+}
+
+// MARK: 圈风 / 门风（每局都在变，所以放主页而不是设置页）
+
+@Composable
+private fun MCRWindSection(
+    prevalent: Int, seat: Int, hasWindPung: Boolean,
+    onPrevalent: (Int) -> Unit, onSeat: (Int) -> Unit, onNextHand: () -> Unit,
+) {
+    SectionCard(
+        title = tr("圈风 / 门风"),
+        icon = Icons.Filled.Explore,
+        accessory = if (hasWindPung) tr("影响本手") else tr("本手无风刻"),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                WindWheel(tr("圈风"), WIND_NAMES.map { tr(it) }, prevalent, onPrevalent,
+                          Modifier.weight(1f))
+                WindWheel(tr("门风"), WIND_NAMES.map { tr(it) }, seat, onSeat,
+                          Modifier.weight(1f))
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    if (hasWindPung) tr("本手有风刻，圈风 / 门风 会改变番数。")
+                    else tr("本手没有风刻，圈风 / 门风 不影响番数。"),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedButton(onClick = onNextHand, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                    Text(tr("下一局"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+/** 结果区的风位提示：只有本手真有风刻时才出现，点一下跳到上面那行滚轮 */
+@Composable
+private fun MCRWindNotice(prevalent: Int, seat: Int, onTap: () -> Unit) {
+    Surface(
+        onClick = onTap,
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(Icons.Filled.Explore, contentDescription = null,
+                 tint = MaterialTheme.colorScheme.primary)
+            Column(Modifier.weight(1f)) {
+                Text(
+                    tr("本手有风刻，正按 圈风%@ · 门风%@ 计算",
+                       tr(WIND_NAMES[prevalent]), tr(WIND_NAMES[seat])),
+                    fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    tr("风位不对的话番数会差最多 4 分，点这里去改"),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                )
+            }
+        }
     }
 }
 
