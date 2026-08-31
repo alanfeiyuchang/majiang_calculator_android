@@ -4,6 +4,14 @@
 [iOS 版](https://github.com/alanfeiyuchang/majiang_calculator) **完全对等移植**：同一套算法、
 同一套番型规则、同一份中英文案、同一个牌面美术、同一个本地识别模型。两端永远不应算出不同结果。
 
+## 下载
+
+[**mahjong-calculator.apk**](https://github.com/alanfeiyuchang/majiang_calculator_android/releases/download/latest-apk/mahjong-calculator.apk)
+—— 直接装的侧载包，跟着 `main` 一起更新（[release 页面](https://github.com/alanfeiyuchang/majiang_calculator_android/releases/tag/latest-apk)）。
+
+手机上用浏览器打开上面的链接下载，系统会提示「允许从此来源安装应用」，开了就能装。
+debug 签名，不走 Play Store；覆盖安装不会丢设置。
+
 - Kotlin + Jetpack Compose（Material 3），单 `:app` 模块
 - 纯逻辑层 `core/`（无 Android 依赖）：`MahjongCard` / `Meld` / `MahjongCalculator`（胡牌·向听·进张·打牌建议）/ `MahjongScoring`（川麻算番计钱）/ `TileGrouping`（拍照分组 + 二次放大区域估计）——与 iOS 同名 Swift 文件逐函数对应
 - **手牌 + 桌上的牌**：碰 / 明杠 / 暗杠单独建模，参与算番与听牌枚举（如碰两组后正确剩 7 张手牌可听，而不是 13 张）
