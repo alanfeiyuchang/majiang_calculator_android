@@ -599,6 +599,62 @@ class MCRScoringTest {
 
     // MARK: - 不重复计算原则
 
+    /** 和牌张未知（界面「已和！」卡片走的就是这条路） */
+    @Test
+    fun unk_unknownWinningTile() {
+        // 这条路径此前没有任何对照测试：winningTile = -1 时凡是要看和牌张的番
+        // 全都拿不到，九莲宝灯 92 → 31，全求人还会被误判「不够起和」。
+        fun unknown(
+            hand: String, melds: List<Meld> = emptyList(), selfDrawn: Boolean = false,
+            tweak: (MCRContext) -> MCRContext = { it },
+        ): MCRScore = scoreMCRHand(
+            handToFrequency34(mt(hand)), melds,
+            tweak(MCRContext(selfDrawn = selfDrawn, winningTile = -1,
+                             seatWind = 0, prevalentWind = 0)),
+        )
+
+        val jiulian = unknown("11123456788999s")
+        assertEquals("UNK1 九莲宝灯要逐张试才认得出", 92, jiulian.scoringPoints)
+        assertTrue(names(jiulian).contains("九莲宝灯"))
+
+        val qiuren = unknown("99m", listOf(
+            mm(Meld.Kind.PONG, "1m"), mm(Meld.Kind.PONG, "2p"),
+            mm(Meld.Kind.CHOW, "3s"), mm(Meld.Kind.PONG, "5z")))
+        assertEquals("UNK2 全求人要靠单钓将", 9, qiuren.scoringPoints)
+        assertTrue("UNK2b 丢了会误判不够起和", qiuren.meetsMinimum)
+
+        assertEquals("UNK3 听牌番照给", 23, unknown("123456789m12355p").scoringPoints)
+
+        // 场景番的校正也要逐张判：一张都说不通就撤销
+        val rob = unknown("11223344556677p") { it.copy(robbingKong = true) }
+        assertEquals("UNK4 没有一张说得通 → 撤销抢杠和", 88, rob.scoringPoints)
+        assertFalse(names(rob).contains("抢杠和"))
+        // 但真说得通的时候不能误撤
+        val robOK = unknown("123m456m789m234p11p") { it.copy(robbingKong = true) }
+        assertTrue("UNK5 有一张说得通就不撤", names(robOK).contains("抢杠和"))
+
+        // 未知和牌张的结果必须等于「逐张试取最优」
+        for (hand in listOf("11123456788999s", "123456789m12355p", "11223344556677p")) {
+            val f = handToFrequency34(mt(hand))
+            var bestKnown = 0
+            for (w in 0 until MCR_TILE_KINDS) {
+                if (f[w] == 0) continue
+                bestKnown = maxOf(bestKnown, scoreMCRHand(
+                    f, emptyList(),
+                    MCRContext(selfDrawn = false, winningTile = w, seatWind = 0, prevalentWind = 0)
+                ).scoringPoints)
+            }
+            assertEquals("UNK6 $hand 未知 = 逐张试的最优", bestKnown, unknown(hand).scoringPoints)
+        }
+
+        // 花牌数不该出现负值，真出现了也不能让总分低于起和分
+        val neg = scoreMCRHand(
+            handToFrequency34(mt("123m456m789m123p55p")), emptyList(),
+            MCRContext(selfDrawn = false, winningTile = mt("5p").first().mcrIndex,
+                       seatWind = 0, prevalentWind = 0, flowers = -5))
+        assertTrue("UNK7 负花牌不至于让总分小于起和分", neg.totalPoints >= neg.scoringPoints)
+    }
+
     /** 场景番：牌面与勾选矛盾时以牌面为准 */
     @Test
     fun rev_boardOverridesCheckboxes() {

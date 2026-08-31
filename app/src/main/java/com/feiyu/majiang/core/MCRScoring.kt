@@ -266,7 +266,9 @@ private data class FanHit(val name: String, val count: Int = 1)
 private fun points(name: String): Int = MCR_FAN_POINTS[name] ?: 0
 
 /** 应用排除表并折算成 FanItem 列表 + 总分 */
-private fun mcrFinalize(hits: List<FanHit>, flowers: Int, options: MCROptions): MCRScore {
+private fun mcrFinalize(hits: List<FanHit>, rawFlowers: Int, options: MCROptions): MCRScore {
+    // 花牌数不可能为负；不设防的话 totalPoints 会小于 scoringPoints
+    val flowers = maxOf(0, rawFlowers)
     val merged = LinkedHashMap<String, Int>()
     for (h in hits) {
         if (h.count <= 0) continue
@@ -862,7 +864,6 @@ private fun mcrSituationalFan(
     fullyConcealed: Boolean,
     allMelded: Boolean,
     singleWait: Boolean,
-    lastTileOfKindByCount: Boolean = false,
 ): List<FanHit> {
     val hits = mutableListOf<FanHit>()
     if (ctx.selfDrawn) {
@@ -876,7 +877,7 @@ private fun mcrSituationalFan(
         if (ctx.lastDiscard) hits.add(FanHit("海底捞月"))
         if (ctx.robbingKong) hits.add(FanHit("抢杠和"))
     }
-    if (ctx.lastTileOfKind || lastTileOfKindByCount) hits.add(FanHit("和绝张"))
+    if (ctx.lastTileOfKind) hits.add(FanHit("和绝张"))
     return hits
 }
 
@@ -930,6 +931,22 @@ fun scoreMCRHand(
     context: MCRContext,
     options: MCROptions = MCROptions(),
 ): MCRScore {
+    // 和牌张未知（界面上的「已和！」卡片就是这种情形）：逐张试，取最高的那种读法。
+    // 不这么做的话，凡是要看和牌张才成立的番全都拿不到——九莲宝灯、全求人、
+    // 边张/坎张/单钓将——九莲宝灯会从 92 分掉到 31 分，全求人少 6 分还会
+    // 被误判成「不够起和」。同时场景番的牌面校正也要跟着逐张判：
+    // 只要没有任何一张说得通，那个勾就得撤销（否则抢杠和能凭空多 8 分）。
+    if (context.winningTile < 0) {
+        var best: MCRScore? = null
+        for (w in 0 until MCR_TILE_KINDS) {
+            if (concealed[w] == 0) continue
+            val s = scoreMCRHand(concealed, melds, context.copy(winningTile = w), options)
+            val b = best
+            if (b == null || s.scoringPoints > b.scoringPoints) best = s
+        }
+        best?.let { return it }
+    }
+
     val full = concealed.copyOf()
     val meldFreq = meldsToFrequency34(melds)
     for (i in 0 until MCR_TILE_KINDS) full[i] += meldFreq[i]
@@ -961,7 +978,6 @@ fun scoreMCRHand(
         }
         c
     }
-    val lastTileOfKindByCount = false
 
     // 独听：和牌前那 13 张只等这一张。官方的边张/坎张/单钓将都要求独听。
     // 用「听牌形状」判，不排除已经用满 4 张的牌：4567条 是两头听，哪怕 7 条
@@ -1008,33 +1024,33 @@ fun scoreMCRHand(
         // 十三幺
         if (mcrIsThirteenOrphans(full)) {
             val hits = mutableListOf(FanHit("十三幺"))
-            hits.addAll(mcrFreqOnlyFan(stats))
             hits += mcrWholeHandFan(stats)
-            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = true, lastTileOfKindByCount = lastTileOfKindByCount)
+            hits.addAll(mcrFreqOnlyFan(stats))
+            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = true)
             consider(hits)
         }
         // 七对 / 连七对
         if (mcrIsSevenPairs(full, options.mcrSevenPairsAllowsQuadAsTwoPairs)) {
             val hits = mutableListOf(FanHit(if (mcrIsSevenShiftedPairs(full)) "连七对" else "七对"))
-            hits.addAll(mcrFreqOnlyFan(stats))
             hits += mcrWholeHandFan(stats)
-            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = true, lastTileOfKindByCount = lastTileOfKindByCount)
+            hits.addAll(mcrFreqOnlyFan(stats))
+            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = true)
             consider(hits)
         }
         // 全不靠 / 七星不靠（可与组合龙叠加）
         if (mcrIsKnittedNoSets(full)) {
             val hits = mutableListOf(FanHit(if (mcrIsSevenStarsKnitted(full)) "七星不靠" else "全不靠"))
             if (mcrHasKnittedStraight(full)) hits.add(FanHit("组合龙"))
-            hits.addAll(mcrFreqOnlyFan(stats))
             hits += mcrWholeHandFan(stats)
-            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = false, lastTileOfKindByCount = lastTileOfKindByCount)
+            hits.addAll(mcrFreqOnlyFan(stats))
+            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = false)
             consider(hits)
         }
         // 九莲宝灯
         if (mcrIsNineGates(full, melds, context.winningTile)) {
             val hits = mutableListOf(FanHit("九莲宝灯"))
             hits += mcrWholeHandFan(stats)
-            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = false, lastTileOfKindByCount = lastTileOfKindByCount)
+            hits += mcrSituationalFan(context, fullyConcealed = true, allMelded = false, singleWait = false)
             consider(hits)
         }
     }
@@ -1042,6 +1058,7 @@ fun scoreMCRHand(
     // ── 组合龙型：9 张组合龙在手 + 1 面子（可副露）+ 1 将 ──────────
     if (melds.size <= 1 && mcrIsKnittedStraightForm(concealed, melds.size)) {
         val hits = mutableListOf(FanHit("组合龙"))
+        hits += mcrWholeHandFan(stats)
         // 这里**不能**用 mcrFreqOnlyFan：官方对组合龙的四归一有严格限定，
         // 只有第 4 副面子那张（还得不是杠）或者将牌能成四归一，不是「凡 4 张就算」。
         // 龙身上的牌哪怕攥了 4 张也不算。清幺九 / 混幺九则天然不可能——
@@ -1064,8 +1081,7 @@ fun scoreMCRHand(
             }
             hits += mcrKnittedWaitFan(extraSets, extraPair, concealed, melds, context.winningTile)
         }
-        hits += mcrWholeHandFan(stats)
-        hits += mcrSituationalFan(context, fullyConcealed, allMelded = false, singleWait = false, lastTileOfKindByCount = lastTileOfKindByCount)
+        hits += mcrSituationalFan(context, fullyConcealed, allMelded = false, singleWait = false)
         consider(hits)
     }
 
@@ -1115,7 +1131,7 @@ fun scoreMCRHand(
             } else {
                 hits += strictWaitFan
             }
-            hits += mcrSituationalFan(context, fullyConcealed, allMelded, singleWait, lastTileOfKindByCount = lastTileOfKindByCount)
+            hits += mcrSituationalFan(context, fullyConcealed, allMelded, singleWait)
             consider(hits)
         }
     }

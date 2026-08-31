@@ -104,6 +104,7 @@ import com.feiyu.majiang.core.MCREvaluatedDiscard
 import com.feiyu.majiang.core.MCRFanInfo
 import com.feiyu.majiang.core.MCRScore
 import com.feiyu.majiang.core.MCR_MINIMUM_POINTS
+import com.feiyu.majiang.core.MCR_TILE_KINDS
 import com.feiyu.majiang.core.MahjongCard
 import com.feiyu.majiang.core.Meld
 import com.feiyu.majiang.core.WinContext
@@ -111,6 +112,7 @@ import com.feiyu.majiang.core.WinScore
 import com.feiyu.majiang.core.handToFrequency27
 import com.feiyu.majiang.core.handToFrequency34
 import com.feiyu.majiang.core.mcrEvaluateDiscards
+import com.feiyu.majiang.core.meldsToFrequency34
 import com.feiyu.majiang.core.moneyText
 import com.feiyu.majiang.core.scoreMCRHand
 import com.feiyu.majiang.core.scoreWinningHand
@@ -182,6 +184,9 @@ class MCRUiState(
     /** 能不能给出可信的番分（13 或 14 张才行；部分手牌只排向听不算番） */
     val scoringAvailable: Boolean,
     val hasKongMeld: Boolean,
+    /** 抢杠和 / 和绝张 牌面上是否可能成立——不可能就别显示那个勾，见下面注释 */
+    val robbingKongPossible: Boolean,
+    val lastTileOfKindPossible: Boolean,
     val kongBloom: Boolean, val onKongBloom: (Boolean) -> Unit,
     val lastTileDraw: Boolean, val onLastTileDraw: (Boolean) -> Unit,
     val lastDiscard: Boolean, val onLastDiscard: (Boolean) -> Unit,
@@ -230,6 +235,16 @@ fun MainScreen(
     val switchModeLabel = tr("切换玩法")
     val hasKongMeld = viewModel.melds.any { it.kind.isKong }
     val kongBloomAvailable = hasKongMeld && settings.kongBloomEnabled
+    // 抢杠和 / 和绝张 这两个勾选，牌面上不可能成立时引擎会直接撤销。
+    // 撤销是对的，但勾了却一分不涨会让人以为是算错——干脆别显示这个勾，
+    // 和上面「没有杠就不显示杠上开花」是同一个做法。
+    val handFreq = handToFrequency34(viewModel.handTiles)
+    val meldFreq = meldsToFrequency34(viewModel.melds)
+    val winCandidates = (0 until MCR_TILE_KINDS).filter { handFreq[it] > 0 }
+    // 抢杠和抢的是别人补杠的第 4 张，自己手上不可能还留着同一张
+    val robbingKongPossible = winCandidates.any { handFreq[it] == 1 && meldFreq[it] == 0 }
+    // 绝张的含义是另外 3 张都在明面上，自己攥着第二张就不是
+    val lastTileOfKindPossible = winCandidates.any { handFreq[it] == 1 }
 
     // 玩法由设置页决定，同步给 ViewModel（切玩法时它会清空手牌与副露）
     LaunchedEffect(gameMode) {
@@ -300,6 +315,8 @@ fun MainScreen(
         isFullHand = effectiveTiles == 14,
         scoringAvailable = effectiveTiles == 13 || effectiveTiles == 14,
         hasKongMeld = hasKongMeld,
+        robbingKongPossible = robbingKongPossible,
+        lastTileOfKindPossible = lastTileOfKindPossible,
         kongBloom = kongBloom, onKongBloom = { kongBloom = it },
         lastTileDraw = mcrLastTileDraw, onLastTileDraw = { mcrLastTileDraw = it },
         lastDiscard = mcrLastDiscard, onLastDiscard = { mcrLastDiscard = it },
@@ -735,9 +752,9 @@ private fun ResultSection(
                 FanChip("妙手回春", mcr.lastTileDraw, mcr.onLastTileDraw)
             } else {
                 FanChip("海底捞月（和最后一张打出的牌）", mcr.lastDiscard, mcr.onLastDiscard)
-                FanChip("抢杠和", mcr.robbingKong, mcr.onRobbingKong)
+                if (mcr.robbingKongPossible) FanChip("抢杠和", mcr.robbingKong, mcr.onRobbingKong)
             }
-            FanChip("和绝张", mcr.lastTileOfKind, mcr.onLastTileOfKind)
+            if (mcr.lastTileOfKindPossible) FanChip("和绝张", mcr.lastTileOfKind, mcr.onLastTileOfKind)
         }
     }
 

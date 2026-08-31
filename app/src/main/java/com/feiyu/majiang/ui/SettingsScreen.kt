@@ -172,6 +172,12 @@ fun SettingsScreen(
                     ) { v -> store.update { it.copy(mcrPerKongFanWithThreeKongs = v) } }
                     SettingsDivider()
                     MCRRuleToggle(
+                        title = tr("一明杠加一暗杠算「明暗杠」"),
+                        note = tr("手里正好一个明杠、一个暗杠时：开 = 按「明暗杠」整体算 5 分（官方竞赛算番器就是这么算的）；关 = 按 1998 规则的 81 番拆成明杠 1 分 + 暗杠 2 分。"),
+                        checked = s.mcrOneOpenOneConcealedKong,
+                    ) { v -> store.update { it.copy(mcrOneOpenOneConcealedKong = v) } }
+                    SettingsDivider()
+                    MCRRuleToggle(
                         title = tr("边张 / 坎张 / 单钓将就高算"),
                         note = tr("和的那张牌能有好几种读法时：开 = 按对你有利的那种读，这 1 分照给；关 = 只有读法唯一、没有第二种拆法时才给这 1 分。"),
                         checked = s.mcrWaitFanHighestReading,
