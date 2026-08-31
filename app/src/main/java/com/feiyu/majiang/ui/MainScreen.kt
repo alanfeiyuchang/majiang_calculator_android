@@ -708,27 +708,27 @@ private fun MCRWindSection(
         accessory = if (hasWindPung) tr("影响本手") else tr("本手无风刻"),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                WindWheel(tr("圈风"), WIND_NAMES.map { tr(it) }, prevalent, onPrevalent,
-                          Modifier.weight(1f))
-                WindWheel(tr("门风"), WIND_NAMES.map { tr(it) }, seat, onSeat,
-                          Modifier.weight(1f))
-            }
+            // 两个选择器 + 「下一局」挤在一行，比滚轮省地方
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(
-                    if (hasWindPung) tr("本手有风刻，圈风 / 门风 会改变番数。")
-                    else tr("本手没有风刻，圈风 / 门风 不影响番数。"),
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-                    modifier = Modifier.weight(1f),
-                )
-                OutlinedButton(onClick = onNextHand, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                WindPicker(tr("圈风"), WIND_NAMES.map { tr(it) }, prevalent, onPrevalent)
+                WindPicker(tr("门风"), WIND_NAMES.map { tr(it) }, seat, onSeat)
+                Spacer(Modifier.weight(1f))
+                OutlinedButton(
+                    onClick = onNextHand,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                ) {
                     Text(tr("下一局"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
+            Text(
+                if (hasWindPung) tr("本手有风刻，圈风 / 门风 会改变番数。")
+                else tr("本手没有风刻，圈风 / 门风 不影响番数。"),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+            )
         }
     }
 }
